@@ -21,7 +21,8 @@ TMA_ID = "0030-927583"
 TMA_PW = "Ccj-222223"
 
 # GAS API URL (タイヤデータ取得用)
-GAS_API_URL = "https://script.google.com/macros/s/AKfycbyo2U1_TBxvzhJL50GHY8S0NeT1k0kueWb4tI1q2Oaw87NuGXqwjO7PWyCDdqFNZTdz/exec"
+# ※Safariで不具合があった時のあのURLを使用
+GAS_API_URL = "https://script.google.com/macros/s/AKfycbyXbPaarnD7mQa_rqm6mk-Os3XBH6C731aGxk7ecJC5U3XjtwfMkeF429rezkAo79jN/exec"
 
 # ==========================================
 # ヘルパー関数
@@ -106,11 +107,13 @@ def main():
         # 3. GASからタイヤデータ取得
         tire_data = None
         try:
-            res = requests.get(f"{GAS_API_URL}?plate={target_plate}")
+            res = requests.get(f"{GAS_API_URL}?plate={target_plate}&check=1") # 接続確認も兼ねて
             if res.status_code == 200:
                 j = res.json()
-                if j.get("found"):
-                    tire_data = j["data"]
+                # GASのレスポンス形式に合わせてデータを取得
+                # doGetが返すのは { ok:true, std_f:..., prev:{...} } の形
+                if j.get("ok"):
+                    tire_data = j
                     print("タイヤデータ取得成功")
         except:
             print("タイヤデータ取得失敗")
@@ -127,21 +130,38 @@ def main():
         # タイヤ入力
         if tire_data:
             click_id(driver, "tireType1")
-            set_val(driver, "tireFrontRegularPressure", tire_data.get("std_front", ""))
-            set_val(driver, "tireRearRegularPressure", tire_data.get("std_rear", ""))
             
-            wheels = [("rf", "FrontRightCm"), ("lf", "FrontLeftCm"), ("lr", "RearLeftBi4"), ("rr", "RearRightBi4")]
+            # 規定値
+            set_val(driver, "tireFrontRegularPressure", tire_data.get("std_f", ""))
+            set_val(driver, "tireRearRegularPressure", tire_data.get("std_r", ""))
+            
+            # 測定値 (prevオブジェクトの中にある)
+            prev = tire_data.get("prev", {})
+            
+            wheels = [
+                ("rf", "FrontRightCm"), 
+                ("lf", "FrontLeftCm"), 
+                ("lr", "RearLeftBi4"), 
+                ("rr", "RearRightBi4")
+            ]
+            
+            # キーのマッピング (GASのJSONキー -> ループ変数)
+            # prevの中身: tread_rf, pre_rf, dot_rf ...
+            
             for pre, suf in wheels:
-                week = str(tire_data.get(f"{pre}_week", ""))
+                # 製造週
+                week = str(prev.get(f"dot_{pre}", ""))
                 if len(week)==3: week = "0"+week
                 set_val(driver, f"tireMfr{suf}", week)
                 
-                depth = str(tire_data.get(f"{pre}_depth", "0"))
+                # 溝深さ
+                depth = str(prev.get(f"tread_{pre}", "0"))
                 ip, fp = (depth.split(".") + ["0"])[0:2]
                 set_val(driver, f"tireGroove{suf}Ip", ip)
                 set_val(driver, f"tireGroove{suf}Fp", fp[0])
                 
-                press = tire_data.get(f"{pre}_press", "")
+                # 空気圧
+                press = prev.get(f"pre_{pre}", "")
                 set_val(driver, f"tirePressure{suf}", press)
                 set_val(driver, f"tirePressureAdjusted{suf}", press)
             
