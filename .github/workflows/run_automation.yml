@@ -1,0 +1,26 @@
+name: Run TMA Automation
+
+on:
+  repository_dispatch:
+    types: [webhook_from_gas]
+
+jobs:
+  run-script:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.9'
+
+      - name: Install dependencies
+        run: |
+          pip install -r requirements.txt
+
+      - name: Run Automation Script
+        run: |
+          python main.py "${{ github.event.client_payload.plate }}"
