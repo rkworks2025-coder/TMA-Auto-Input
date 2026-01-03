@@ -50,7 +50,6 @@ def take_screenshot(driver, name):
 
 def click_strict(driver, selector_or_xpath):
     """クリックできなければ即死する"""
-    # XPathかCSSかを簡易判定
     if selector_or_xpath.startswith("/") or selector_or_xpath.startswith("("):
         by_method = By.XPATH
         sel = selector_or_xpath
@@ -90,7 +89,7 @@ def input_strict(driver, selector_or_id, value):
 def main():
     print("=== Automation Start ===")
 
-    # 1. 引数取得（なければ空文字、あればその値）
+    # 1. 引数取得（空文字でもOK）
     target_plate = sys.argv[1] if len(sys.argv) > 1 else ""
     
     # URL取得
@@ -105,7 +104,7 @@ def main():
         driver.get(target_login_url)
         take_screenshot(driver, "00_LoginPage")
 
-        # ID分割 (0030-927583)
+        # ID分割
         id_parts = TMA_ID.split("-")
         
         # 本番・ダミー完全共通ID
@@ -115,19 +114,19 @@ def main():
         
         click_strict(driver, ".btn-primary")
         
-        # --- [1.5] メニュー画面 (予約履歴ボタンを探す) ---
+        # --- [1.5] メニュー画面遷移 (ここを修正) ---
         print("\n--- [1.5] メニュー画面遷移 ---")
         try:
-            # 「予約履歴」または「History」を含む要素をクリック
-            # menu.html が正しくあればここで捕まる
+            # ★修正点: 「//main」を付けて、画面中央のメインコンテンツ内のボタンのみを狙い撃ちする
+            # これで隠れているヘッダーメニューのリンクを無視できる
             menu_btn = WebDriverWait(driver, 10).until(
-                EC.element_to_be_clickable((By.XPATH, "//a[contains(text(),'予約履歴')] | //button[contains(text(),'予約履歴')] | //a[contains(@href,'reserve')]"))
+                EC.element_to_be_clickable((By.XPATH, "//main//a[contains(@href,'reserve')] | //div[contains(@class,'main-contents')]//a[contains(@href,'reserve')]"))
             )
             print("   メニュー画面確認: 予約履歴ボタンをクリック")
             menu_btn.click()
         except:
             take_screenshot(driver, "ERROR_MenuPage")
-            raise Exception("ログインしましたが、メニュー画面の『予約履歴』ボタンが見つかりません (menu.htmlはありますか？)")
+            raise Exception("メニュー画面の『予約履歴』ボタンが見つかりません (menu.htmlの<main>内にリンクはありますか？)")
 
         # --- [2] 車両選択 (リストの一番上) ---
         print("\n--- [2] 車両リスト画面 ---")
@@ -171,7 +170,7 @@ def main():
 
         click_strict(driver, "tireType1")
         
-        # 値入力 (データ有無にかかわらず同じ処理)
+        # 値入力
         input_strict(driver, "tireFrontRegularPressure", tire_data.get("std_f", "240"))
         input_strict(driver, "tireRearRegularPressure", tire_data.get("std_r", "240"))
         
