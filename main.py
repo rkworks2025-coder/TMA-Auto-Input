@@ -91,7 +91,7 @@ def input_strict(driver, selector_or_id, value):
 # メイン処理
 # ==========================================
 def main():
-    print("=== Automation Start (Correct Flow) ===")
+    print("=== Automation Start (Strict Mode) ===")
 
     # 1. 引数取得
     target_plate = sys.argv[1] if len(sys.argv) > 1 else ""
@@ -123,22 +123,24 @@ def main():
         # --- [2] 車両リスト選択 & ポップアップ開始 ---
         print("\n--- [2] 車両リスト選択 & 開始ポップアップ ---")
         try:
-            # 1. リストの一番上をクリック
-            click_strict(driver, "(//main//div[contains(@class,'main-contents')]//a)[1] | (//main//a)[1]")
-            print("   リスト選択: ポップアップ待機中...")
+            # ★【修正】「予約変更」などの隣接ボタンを避け、確実に「点検」の文字が入ったボタンを押す
+            # リストの一番上にある「点検」ボタンを狙い撃ち
+            inspection_btn_xpath = "(//table//a[contains(text(), '点検')])[1]"
+            click_strict(driver, inspection_btn_xpath)
+            print("   リスト選択: 『点検』ボタンをクリック (予約変更等は無視)")
             
-            # 2. ポップアップのボタンをクリック (ID指定で確実に)
-            # reserve.html 151行目のID: posupMessageConfirmOk
+            # ★【修正】ポップアップの「開始」をID指定で押す
+            # reserve.html 151行目のID: posupMessageConfirmOk (キャンセル等は無視)
             click_strict(driver, "#posupMessageConfirmOk")
             print("   ポップアップ: 確認ボタン(ID:posupMessageConfirmOk)を押下")
 
         except:
              take_screenshot(driver, "ERROR_ReservePopup")
-             raise Exception("車両リスト選択後のポップアップ『開始/完了』処理に失敗しました")
+             raise Exception("車両リスト選択後のポップアップ処理に失敗しました (ボタンが見つからないかID不一致)")
 
         # --- [2.5] トップ画面 (点検開始処理) ---
         print("\n--- [2.5] トップ画面 (点検開始) ---")
-        # index.html に遷移しているはず
+        # index.html に遷移
         try:
             # 1. 黄色い「開始」ボタン (点検開始) を押す
             start_check_xpath = "//input[@value='開始'] | //button[contains(text(),'開始')]"
@@ -148,6 +150,7 @@ def main():
             time.sleep(3) # リロード待ち
 
             # 2. 「日常点検」の横の「点検」ボタンを押す
+            # "日常点検" という文字を含む行の、"点検" ボタン
             daily_check_btn_xpath = "//tr[contains(.,'日常点検')]//a[contains(text(),'点検')] | //div[contains(.,'日常点検')]//a[contains(text(),'点検')]"
             click_strict(driver, daily_check_btn_xpath)
             print("   トップ画面: 『日常点検』へ移動")
@@ -164,13 +167,12 @@ def main():
             WebDriverWait(driver, 10).until(EC.presence_of_element_located((By.TAG_NAME, "body")))
         except:
             take_screenshot(driver, "ERROR_DailyCheckLoad")
-            raise Exception("日常点検画面が開けませんでした")
+            raise Exception("日常点検画面 (daily_check.html) が開けませんでした")
 
         # ★タブ切り替え: 「足回り」または「タイヤ」タブをクリック
         try:
             print("   タブ切り替え: タイヤ/足回りタブを探します")
             tab_xpath = "//li[contains(text(),'足回り')] | //a[contains(text(),'足回り')] | //li[contains(text(),'タイヤ')] | //a[contains(text(),'タイヤ')]"
-            # タブがあればクリック
             if len(driver.find_elements(By.XPATH, tab_xpath)) > 0:
                 click_strict(driver, tab_xpath)
                 time.sleep(1)
@@ -200,7 +202,7 @@ def main():
         except:
             print("   (エンジンルーム項目が見つかりません。タブが違う可能性がありますが続行します)")
 
-        # タイヤ入力（ここが本丸）
+        # タイヤ入力
         try:
             click_strict(driver, "tireType1")
             
@@ -249,7 +251,7 @@ def main():
         take_screenshot(driver, "03_PreComplete")
         
         try:
-            # 完了ボタン (mainタグ内優先)
+            # 完了ボタン
             finish_btn = WebDriverWait(driver, 5).until(
                 EC.element_to_be_clickable((By.CSS_SELECTOR, "main a.is-complete, main .btn-complete, a.btn-complete"))
             )
