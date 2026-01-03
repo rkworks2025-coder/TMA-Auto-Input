@@ -104,36 +104,35 @@ def main():
         driver.get(target_login_url)
         take_screenshot(driver, "00_LoginPage")
 
-        # ID分割
         id_parts = TMA_ID.split("-")
         
-        # 本番・ダミー完全共通ID
         input_strict(driver, "#cardNo1", id_parts[0])
         input_strict(driver, "#cardNo2", id_parts[1])
         input_strict(driver, "#password", TMA_PW)
         
         click_strict(driver, ".btn-primary")
         
-        # --- [1.5] メニュー画面遷移 (ここを修正) ---
+        # --- [1.5] メニュー画面遷移 ---
         print("\n--- [1.5] メニュー画面遷移 ---")
         try:
-            # ★修正点: 「//main」を付けて、画面中央のメインコンテンツ内のボタンのみを狙い撃ちする
-            # これで隠れているヘッダーメニューのリンクを無視できる
+            # ★【修正】隠れメニュー回避: <main>タグの中にある「予約履歴」ボタンのみを対象にする
+            # menu.html, 予約.html 共通
             menu_btn = WebDriverWait(driver, 10).until(
-                EC.element_to_be_clickable((By.XPATH, "//main//a[contains(@href,'reserve')] | //div[contains(@class,'main-contents')]//a[contains(@href,'reserve')]"))
+                EC.element_to_be_clickable((By.XPATH, "//main//a[contains(@href,'reserve')] | //main//button[contains(text(),'予約履歴')]"))
             )
             print("   メニュー画面確認: 予約履歴ボタンをクリック")
             menu_btn.click()
         except:
             take_screenshot(driver, "ERROR_MenuPage")
-            raise Exception("メニュー画面の『予約履歴』ボタンが見つかりません (menu.htmlの<main>内にリンクはありますか？)")
+            raise Exception("メニュー画面の『予約履歴』ボタンが見つかりません (メインエリア内にボタンはありますか？)")
 
-        # --- [2] 車両選択 (リストの一番上) ---
+        # --- [2] 車両リスト画面 ---
         print("\n--- [2] 車両リスト画面 ---")
         try:
-            # 遷移待ち: リストの最初のリンクが出るまで
+            # ★【修正】隠れメニュー回避: <main>タグの中にある最初のリンク(車両)のみを対象にする
+            # reserve.html, 予約.html 共通
             top_link = WebDriverWait(driver, 10).until(
-                EC.element_to_be_clickable((By.XPATH, "(//div[contains(@class,'list')]//a)[1] | (//a[contains(@href, 'html')])[1]"))
+                EC.element_to_be_clickable((By.XPATH, "(//main//div[contains(@class,'main-contents')]//a)[1] | (//main//a)[1]"))
             )
             print("   リストの一番上を選択します")
             top_link.click()
@@ -161,7 +160,7 @@ def main():
         except:
             print("   通信エラーまたはデータなし（デフォルト値を使用）")
 
-        # --- [4] 入力実行 ---
+        # --- [4] 入力実行 (IDは実物HTMLと一致確認済み) ---
         print("\n--- [4] 入力実行 ---")
         
         click_strict(driver, "coolantGauge1")
@@ -198,14 +197,16 @@ def main():
 
         take_screenshot(driver, "02_InputResult")
 
-        # その他項目
+        # その他項目（あればクリック）
         ids_ok = [
             "engineCondition1", "brakeCondition1", "parkingBrakeCondition1", 
             "washerSprayCondition1", "wiperWipeCondition1", "interiorDirt01", "exteriorDirt02"
         ]
         for i in ids_ok:
             try:
-                driver.find_element(By.ID, i).click()
+                # 存在確認だけして、あればクリック
+                if len(driver.find_elements(By.ID, i)) > 0:
+                     driver.find_element(By.ID, i).click()
             except:
                 pass 
 
@@ -213,16 +214,21 @@ def main():
         print("\n--- [5] 完了処理 ---")
         tasks = ['daily', 'interior', 'wash', 'exterior', 'lend']
         for t in tasks:
+            # JS関数があれば実行
             driver.execute_script(f"if(typeof completeTask === 'function') completeTask('{t}');")
             time.sleep(1)
 
         take_screenshot(driver, "03_PreComplete")
         
         try:
+            # ★【修正】完了ボタンも <main> または 明確な完了ボタンクラスを狙う
+            # 隠れメニューを避けるため、.btn-complete などの具体的クラスを優先
             finish_btn = WebDriverWait(driver, 5).until(
-                EC.element_to_be_clickable((By.CSS_SELECTOR, "a.is-complete, .btn-complete"))
+                EC.element_to_be_clickable((By.CSS_SELECTOR, "main a.is-complete, main .btn-complete, a.btn-complete"))
             )
             finish_btn.click()
+            
+            # アラート承認
             WebDriverWait(driver, 3).until(EC.alert_is_present()).accept()
             print("   完了アラート承認")
         except:
