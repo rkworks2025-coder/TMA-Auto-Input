@@ -13,15 +13,14 @@ from webdriver_manager.chrome import ChromeDriverManager
 # ==========================================
 # 設定エリア
 # ==========================================
-# TMAログインURL
-TMA_LOGIN_URL = "https://dailycheck.tc-extsys.jp/tcrappsweb/web/login/tawLogin.html"
+# デフォルトのログインURL (引数でURLが渡されなかった場合のバックアップ)
+DEFAULT_LOGIN_URL = "https://dailycheck.tc-extsys.jp/tcrappsweb/web/login/tawLogin.html"
 
 # ログインID / PW
 TMA_ID = "0030-927583"
 TMA_PW = "Ccj-222223"
 
 # GAS API URL (タイヤデータ取得用)
-# ※Safariで不具合があった時のあのURLを使用
 GAS_API_URL = "https://script.google.com/macros/s/AKfycbyXbPaarnD7mQa_rqm6mk-Os3XBH6C731aGxk7ecJC5U3XjtwfMkeF429rezkAo79jN/exec"
 
 # ==========================================
@@ -61,12 +60,21 @@ def set_val(driver, eid, val):
 # メイン処理
 # ==========================================
 def main():
-    # 引数から車両ナンバーを取得 (GASから渡される)
+    # 引数の受け取り
+    # 1. 車両ナンバー
     if len(sys.argv) > 1:
         target_plate = sys.argv[1]
     else:
         print("エラー: 車両ナンバーが指定されていません")
         sys.exit(1)
+
+    # 2. 接続先URL (GASから渡された場合に使用)
+    if len(sys.argv) > 2 and sys.argv[2]:
+        target_login_url = sys.argv[2]
+        print(f"★モード指定あり: {target_login_url} に接続します")
+    else:
+        target_login_url = DEFAULT_LOGIN_URL
+        print(f"モード指定なし: 本番({target_login_url}) に接続します")
 
     print(f"開始: 車両No {target_plate} の自動入力を開始します")
     
@@ -75,12 +83,13 @@ def main():
     try:
         # 1. ログイン処理
         print("ログインページへ移動中...")
-        driver.get(TMA_LOGIN_URL)
+        driver.get(target_login_url)
         
         try:
             WebDriverWait(driver, 10).until(EC.presence_of_element_located((By.TAG_NAME, "body")))
             
             # ログインフォームの入力
+            # (本番もダミーも同じセレクタで入力できるようにJSで処理)
             driver.execute_script(f"document.querySelector('input[type=\"text\"]').value = '{TMA_ID}';")
             driver.execute_script(f"document.querySelector('input[type=\"password\"]').value = '{TMA_PW}';")
             
@@ -111,7 +120,6 @@ def main():
             if res.status_code == 200:
                 j = res.json()
                 # GASのレスポンス形式に合わせてデータを取得
-                # doGetが返すのは { ok:true, std_f:..., prev:{...} } の形
                 if j.get("ok"):
                     tire_data = j
                     print("タイヤデータ取得成功")
@@ -146,8 +154,6 @@ def main():
             ]
             
             # キーのマッピング (GASのJSONキー -> ループ変数)
-            # prevの中身: tread_rf, pre_rf, dot_rf ...
-            
             for pre, suf in wheels:
                 # 製造週
                 week = str(prev.get(f"dot_{pre}", ""))
