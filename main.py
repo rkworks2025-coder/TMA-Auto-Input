@@ -127,22 +127,20 @@ def main():
             click_strict(driver, "(//main//div[contains(@class,'main-contents')]//a)[1] | (//main//a)[1]")
             print("   リスト選択: ポップアップ待機中...")
             
-            # 2. ポップアップの「開始」ボタンをクリック
-            # モーダル(div.alert-modal等)の中にある「開始」または「Start」を探す
-            popup_start_btn_xpath = "//div[contains(@class,'modal')]//input[@value='開始'] | //div[contains(@class,'modal')]//a[contains(text(),'開始')] | //div[contains(@class,'modal')]//button[contains(text(),'開始')]"
-            click_strict(driver, popup_start_btn_xpath)
-            print("   ポップアップ: 開始ボタン押下")
+            # 2. ポップアップのボタンをクリック (ID指定で確実に)
+            # reserve.html 151行目のID: posupMessageConfirmOk
+            click_strict(driver, "#posupMessageConfirmOk")
+            print("   ポップアップ: 確認ボタン(ID:posupMessageConfirmOk)を押下")
 
         except:
              take_screenshot(driver, "ERROR_ReservePopup")
-             raise Exception("車両リスト選択後のポップアップ『開始』処理に失敗しました")
+             raise Exception("車両リスト選択後のポップアップ『開始/完了』処理に失敗しました")
 
         # --- [2.5] トップ画面 (点検開始処理) ---
         print("\n--- [2.5] トップ画面 (点検開始) ---")
         # index.html に遷移しているはず
         try:
             # 1. 黄色い「開始」ボタン (点検開始) を押す
-            # "点検開始" という文字の近く、または input[value='開始'] を探す
             start_check_xpath = "//input[@value='開始'] | //button[contains(text(),'開始')]"
             click_strict(driver, start_check_xpath)
             print("   トップ画面: 『点検開始』ボタン押下 -> リロード待機")
@@ -150,7 +148,6 @@ def main():
             time.sleep(3) # リロード待ち
 
             # 2. 「日常点検」の横の「点検」ボタンを押す
-            # "日常点検" という文字を含む行の、"点検" ボタンを探す
             daily_check_btn_xpath = "//tr[contains(.,'日常点検')]//a[contains(text(),'点検')] | //div[contains(.,'日常点検')]//a[contains(text(),'点検')]"
             click_strict(driver, daily_check_btn_xpath)
             print("   トップ画面: 『日常点検』へ移動")
@@ -173,7 +170,7 @@ def main():
         try:
             print("   タブ切り替え: タイヤ/足回りタブを探します")
             tab_xpath = "//li[contains(text(),'足回り')] | //a[contains(text(),'足回り')] | //li[contains(text(),'タイヤ')] | //a[contains(text(),'タイヤ')]"
-            # タブがあればクリック、なければそのまま（1ページ構成の可能性も考慮）
+            # タブがあればクリック
             if len(driver.find_elements(By.XPATH, tab_xpath)) > 0:
                 click_strict(driver, tab_xpath)
                 time.sleep(1)
