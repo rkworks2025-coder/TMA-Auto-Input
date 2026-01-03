@@ -48,10 +48,18 @@ def take_screenshot(driver, name):
     except:
         print("   [写] 撮影失敗")
 
-def click_strict(driver, selector_or_id):
-    sel = selector_or_id if (selector_or_id.startswith("#") or "." in selector_or_id) else f"#{selector_or_id}"
+def click_strict(driver, selector_or_xpath):
+    """クリックできなければ即死する"""
+    # XPathかCSSかを簡易判定
+    if selector_or_xpath.startswith("/") or selector_or_xpath.startswith("("):
+        by_method = By.XPATH
+        sel = selector_or_xpath
+    else:
+        by_method = By.CSS_SELECTOR
+        sel = selector_or_xpath if (selector_or_xpath.startswith("#") or "." in selector_or_xpath) else f"#{selector_or_xpath}"
+
     try:
-        el = WebDriverWait(driver, 10).until(EC.element_to_be_clickable((By.CSS_SELECTOR, sel)))
+        el = WebDriverWait(driver, 10).until(EC.element_to_be_clickable((by_method, sel)))
         el.click()
         print(f"   [OK] Click: {sel}")
     except:
@@ -82,7 +90,7 @@ def input_strict(driver, selector_or_id, value):
 def main():
     print("=== Automation Start ===")
 
-    # 1. 引数取得（なければ空文字、あればその値。分岐処理はしない）
+    # 1. 引数取得（なければ空文字、あればその値）
     target_plate = sys.argv[1] if len(sys.argv) > 1 else ""
     
     # URL取得
@@ -97,47 +105,56 @@ def main():
         driver.get(target_login_url)
         take_screenshot(driver, "00_LoginPage")
 
-        # ID分割 (常にハイフン分割前提で処理)
+        # ID分割 (0030-927583)
         id_parts = TMA_ID.split("-")
         
-        # 本番・ダミー完全共通のIDを指定
+        # 本番・ダミー完全共通ID
         input_strict(driver, "#cardNo1", id_parts[0])
         input_strict(driver, "#cardNo2", id_parts[1])
         input_strict(driver, "#password", TMA_PW)
         
         click_strict(driver, ".btn-primary")
         
-        print("   画面遷移待ち...")
+        # --- [1.5] メニュー画面 (予約履歴ボタンを探す) ---
+        print("\n--- [1.5] メニュー画面遷移 ---")
         try:
-            WebDriverWait(driver, 10).until(
-                EC.presence_of_element_located((By.CSS_SELECTOR, "div.list, #coolantGauge1, body"))
+            # 「予約履歴」または「History」を含む要素をクリック
+            # menu.html が正しくあればここで捕まる
+            menu_btn = WebDriverWait(driver, 10).until(
+                EC.element_to_be_clickable((By.XPATH, "//a[contains(text(),'予約履歴')] | //button[contains(text(),'予約履歴')] | //a[contains(@href,'reserve')]"))
             )
+            print("   メニュー画面確認: 予約履歴ボタンをクリック")
+            menu_btn.click()
         except:
-            raise Exception("ログイン後の画面遷移に失敗しました")
-        
-        print("   ログイン成功確認")
+            take_screenshot(driver, "ERROR_MenuPage")
+            raise Exception("ログインしましたが、メニュー画面の『予約履歴』ボタンが見つかりません (menu.htmlはありますか？)")
 
-        # --- [2] 車両選択 (常にリストトップを選択) ---
-        print("\n--- [2] 車両選択 ---")
-        if len(driver.find_elements(By.ID, "coolantGauge1")) > 0:
-             print("   すでに詳細画面です")
-        else:
-             print("   リストの一番上を選択します")
-             try:
-                 top_link = WebDriverWait(driver, 10).until(
-                     EC.element_to_be_clickable((By.XPATH, "(//a[contains(@href, 'html')])[1] | (//div[contains(@class,'list')]//a)[1]"))
-                 )
-                 top_link.click()
-             except:
-                 raise Exception("車両リストのクリックに失敗しました")
+        # --- [2] 車両選択 (リストの一番上) ---
+        print("\n--- [2] 車両リスト画面 ---")
+        try:
+            # 遷移待ち: リストの最初のリンクが出るまで
+            top_link = WebDriverWait(driver, 10).until(
+                EC.element_to_be_clickable((By.XPATH, "(//div[contains(@class,'list')]//a)[1] | (//a[contains(@href, 'html')])[1]"))
+            )
+            print("   リストの一番上を選択します")
+            top_link.click()
+        except:
+             take_screenshot(driver, "ERROR_ListNotFound")
+             raise Exception("車両リストが見つからないか、クリックできません")
+
+        # 詳細画面が開いたことを確認
+        try:
+            WebDriverWait(driver, 10).until(EC.visibility_of_element_located((By.CSS_SELECTOR, "#tireType1")))
+        except:
+            take_screenshot(driver, "ERROR_DetailNotLoaded")
+            raise Exception("詳細画面への遷移に失敗しました")
 
         take_screenshot(driver, "01_VehicleSelected")
 
-        # --- [3] データ取得 (常に問い合わせる) ---
+        # --- [3] データ取得 (ナンバーが空ならスキップ→デフォルト) ---
         print("\n--- [3] GASデータ取得 ---")
         tire_data = {}
         try:
-            # 空文字でもそのまま投げる（GAS側で処理、もしくはエラーならexceptでデフォルトへ）
             res = requests.get(f"{GAS_API_URL}?plate={target_plate}&check=1")
             j = res.json()
             if j.get("ok"):
@@ -145,7 +162,7 @@ def main():
         except:
             print("   通信エラーまたはデータなし（デフォルト値を使用）")
 
-        # --- [4] 入力実行 (データの有無に関わらず処理は同じ) ---
+        # --- [4] 入力実行 ---
         print("\n--- [4] 入力実行 ---")
         
         click_strict(driver, "coolantGauge1")
@@ -154,7 +171,7 @@ def main():
 
         click_strict(driver, "tireType1")
         
-        # 値があればそれを使用、なければデフォルト (分岐不要)
+        # 値入力 (データ有無にかかわらず同じ処理)
         input_strict(driver, "tireFrontRegularPressure", tire_data.get("std_f", "240"))
         input_strict(driver, "tireRearRegularPressure", tire_data.get("std_r", "240"))
         
