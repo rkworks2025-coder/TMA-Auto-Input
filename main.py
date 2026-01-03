@@ -123,20 +123,26 @@ def main():
         # --- [2] 車両リスト選択 & ポップアップ開始 ---
         print("\n--- [2] 車両リスト選択 & 開始ポップアップ ---")
         try:
-            # ★【修正】「予約変更」などの隣接ボタンを避け、確実に「点検」の文字が入ったボタンを押す
-            # リストの一番上にある「点検」ボタンを狙い撃ち
-            inspection_btn_xpath = "(//table//a[contains(text(), '点検')])[1]"
+            # ★【修正箇所】reserve.htmlの構造に合わせてXPathを変更
+            # <a>タグは<table>の中ではなく、<div class="other-btn-area">の中にあるため修正
+            inspection_btn_xpath = "(//div[contains(@class, 'other-btn-area')]//a[contains(text(), '点検')])[1]"
             click_strict(driver, inspection_btn_xpath)
-            print("   リスト選択: 『点検』ボタンをクリック (予約変更等は無視)")
+            print("   リスト選択: 『点検』ボタンをクリック")
+
+            # ★【修正箇所】ポップアップが表示されるのを待機してからボタンを押す
+            print("   ポップアップ: 表示待機中...")
+            WebDriverWait(driver, 5).until(
+                EC.visibility_of_element_located((By.ID, "posupMessageConfirm"))
+            )
             
-            # ★【修正】ポップアップの「開始」をID指定で押す
-            # reserve.html 151行目のID: posupMessageConfirmOk (キャンセル等は無視)
+            # ポップアップの「開始（完了）」ボタンを押す
             click_strict(driver, "#posupMessageConfirmOk")
             print("   ポップアップ: 確認ボタン(ID:posupMessageConfirmOk)を押下")
 
-        except:
+        except Exception as e:
              take_screenshot(driver, "ERROR_ReservePopup")
-             raise Exception("車両リスト選択後のポップアップ処理に失敗しました (ボタンが見つからないかID不一致)")
+             # エラー内容を詳細に表示
+             raise Exception(f"車両リスト選択後のポップアップ処理に失敗しました: {e}")
 
         # --- [2.5] トップ画面 (点検開始処理) ---
         print("\n--- [2.5] トップ画面 (点検開始) ---")
@@ -169,13 +175,16 @@ def main():
             take_screenshot(driver, "ERROR_DailyCheckLoad")
             raise Exception("日常点検画面 (daily_check.html) が開けませんでした")
 
-        # ★タブ切り替え: 「足回り」または「タイヤ」タブをクリック
+        # ★タブ切り替え: 「エンジンルーム」タブがデフォルトになったので、「タイヤ」への切り替えが必要
         try:
             print("   タブ切り替え: タイヤ/足回りタブを探します")
-            tab_xpath = "//li[contains(text(),'足回り')] | //a[contains(text(),'足回り')] | //li[contains(text(),'タイヤ')] | //a[contains(text(),'タイヤ')]"
+            tab_xpath = "//div[contains(@class,'tab-button')][contains(.,'タイヤ')] | //li[contains(text(),'タイヤ')] | //a[contains(text(),'タイヤ')]"
+            
+            # タブが存在するか確認してからクリック
             if len(driver.find_elements(By.XPATH, tab_xpath)) > 0:
                 click_strict(driver, tab_xpath)
                 time.sleep(1)
+                print("   タブ切り替え: 完了")
             else:
                 print("   (タブが見つからないため、そのままスクロールで探します)")
         except:
@@ -194,13 +203,14 @@ def main():
         # --- [4] 入力実行 ---
         print("\n--- [4] 入力実行 ---")
         
-        # 液体類（エンジンルームタブにある可能性があるため、見つからなければスキップしてタイヤへ）
+        # 液体類（エンジンルームタブはデフォルトで開いているはず）
         try:
             click_strict(driver, "coolantGauge1")
             click_strict(driver, "engineOilGauge1")
             click_strict(driver, "washerFluidGauge1")
+            print("   エンジンルーム入力完了")
         except:
-            print("   (エンジンルーム項目が見つかりません。タブが違う可能性がありますが続行します)")
+            print("   (エンジンルーム項目が見つかりません。スキップします)")
 
         # タイヤ入力
         try:
@@ -266,7 +276,9 @@ def main():
     except Exception as e:
         print(f"\n[!!!] CRITICAL ERROR [!!!]\n{e}")
         take_screenshot(driver, "FATAL_ERROR")
-        raise e 
+        # raise e 
+        # Actionsを失敗扱いにしたい場合は raise e を生かす
+        sys.exit(1)
     finally:
         driver.quit()
 
