@@ -12,6 +12,12 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v3
 
+      # ▼▼▼ 追加: 日本語フォントをインストール（文字化け対策） ▼▼▼
+      - name: Install Japanese Fonts
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y fonts-noto-cjk
+
       - name: Set up Python
         uses: actions/setup-python@v4
         with:
@@ -22,13 +28,13 @@ jobs:
           pip install -r requirements.txt
 
       - name: Run Automation Script
-        # Pythonに車両ナンバーとURLを渡して実行
+        # エラーがあれば即座にジョブを失敗させる設定
         run: |
           python main.py "${{ github.event.client_payload.plate }}" "${{ github.event.client_payload.target_url }}"
 
-      # ▼▼▼ 追加: 証拠写真（スクリーンショット）を保存してダウンロード可能にする ▼▼▼
+      # 成功・失敗に関わらず、必ず証拠写真をアップロード
       - name: Upload Evidence
-        if: always() # エラーが出ても必ず写真は残す
+        if: always()
         uses: actions/upload-artifact@v4
         with:
           name: verification-screenshots
