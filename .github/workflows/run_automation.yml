@@ -23,4 +23,4 @@ jobs:
 
       - name: Run Automation Script
         run: |
-          python main.py "${{ github.event.client_payload.plate }}"
+          python main.py "${{ github.event.client_payload.plate }}" "${{ github.event.client_payload.target_url }}"
