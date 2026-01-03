@@ -38,175 +38,148 @@ def get_chrome_driver():
     return webdriver.Chrome(service=service, options=options)
 
 def take_screenshot(driver, name):
-    """必ず写真を撮る"""
     if not os.path.exists(EVIDENCE_DIR):
         os.makedirs(EVIDENCE_DIR)
     timestamp = datetime.datetime.now().strftime('%H%M%S')
     filename = f"{EVIDENCE_DIR}/{name}_{timestamp}.png"
-    driver.save_screenshot(filename)
-    print(f"   [写] 保存: {filename}")
-
-def find_strict(driver, selector):
-    """見つからなければ即死する検索"""
     try:
-        return WebDriverWait(driver, 10).until(EC.visibility_of_element_located((By.CSS_SELECTOR, selector)))
-    except Exception:
-        take_screenshot(driver, "ERROR_NotFound")
-        raise Exception(f"要素が見つかりません: {selector}")
+        driver.save_screenshot(filename)
+        print(f"   [写] 保存: {filename}")
+    except:
+        print("   [写] 撮影失敗")
 
 def click_strict(driver, selector_or_id):
-    """クリックできなければ即死する"""
-    # IDかCSSか自動判定
-    if selector_or_id.startswith("#") or "." in selector_or_id or "[" in selector_or_id:
-        sel = selector_or_id
-    else:
-        sel = f"#{selector_or_id}"
-
+    sel = selector_or_id if (selector_or_id.startswith("#") or "." in selector_or_id) else f"#{selector_or_id}"
     try:
         el = WebDriverWait(driver, 10).until(EC.element_to_be_clickable((By.CSS_SELECTOR, sel)))
         el.click()
         print(f"   [OK] Click: {sel}")
-    except Exception:
+    except:
         take_screenshot(driver, "ERROR_ClickFailed")
-        raise Exception(f"クリックに失敗しました: {sel}")
+        raise Exception(f"クリック不可: {sel}")
 
 def input_strict(driver, selector_or_id, value):
-    """入力後、値が一致しなければ即死する"""
-    if selector_or_id.startswith("#") or "." in selector_or_id:
-        sel = selector_or_id
-    else:
-        sel = f"#{selector_or_id}"
-
+    sel = selector_or_id if (selector_or_id.startswith("#") or "." in selector_or_id) else f"#{selector_or_id}"
     try:
         el = WebDriverWait(driver, 10).until(EC.visibility_of_element_located((By.CSS_SELECTOR, sel)))
         el.clear()
         el.send_keys(str(value))
         
-        # 検証
         actual = el.get_attribute('value')
         if str(actual) != str(value):
             take_screenshot(driver, "ERROR_InputMismatch")
-            raise Exception(f"入力不一致! 期待: {value}, 実際: {actual} (Target: {sel})")
+            raise Exception(f"入力値不一致: 期待({value}) != 実際({actual})")
         
         print(f"   [OK] Input: {value} -> {sel}")
     except Exception as e:
         take_screenshot(driver, "ERROR_InputFailed")
-        raise e # エラーを握りつぶさずに投げる
+        print(f"   [Error] 入力失敗: {sel}")
+        raise e
 
 # ==========================================
 # メイン処理
 # ==========================================
 def main():
-    # 引数チェック
-    if len(sys.argv) > 1:
-        target_plate = sys.argv[1]
-    else:
-        raise Exception("車両ナンバー引数がありません")
+    print("=== Automation Start ===")
 
-    target_login_url = DEFAULT_LOGIN_URL
-    if len(sys.argv) > 2 and sys.argv[2]:
-        target_login_url = sys.argv[2]
-        print(f"MODE: 指定URL ({target_login_url})")
-    else:
-        print(f"MODE: 本番URL ({target_login_url})")
+    # 1. 引数取得（なければ空文字、あればその値。分岐処理はしない）
+    target_plate = sys.argv[1] if len(sys.argv) > 1 else ""
+    
+    # URL取得
+    target_login_url = sys.argv[2] if (len(sys.argv) > 2 and sys.argv[2]) else DEFAULT_LOGIN_URL
+    print(f"MODE: URL ({target_login_url})")
 
     driver = get_chrome_driver()
 
     try:
-        # 1. ログイン
+        # --- [1] ログイン ---
         print("\n--- [1] ログイン開始 ---")
         driver.get(target_login_url)
         take_screenshot(driver, "00_LoginPage")
 
-        # 入力欄を厳格に探す (IDまたは属性で特定)
-        # ※ダミーと本番の両方に対応できるCSSセレクタを使用
-        input_strict(driver, "input[type='text'], #userId", TMA_ID)
-        input_strict(driver, "input[type='password'], #password", TMA_PW)
+        # ID分割 (常にハイフン分割前提で処理)
+        id_parts = TMA_ID.split("-")
         
-        click_strict(driver, "button, input[type='submit'], .btn-login")
+        # 本番・ダミー完全共通のIDを指定
+        input_strict(driver, "#cardNo1", id_parts[0])
+        input_strict(driver, "#cardNo2", id_parts[1])
+        input_strict(driver, "#password", TMA_PW)
         
-        # ★ログイン成功判定: 次の画面の要素が出るまで待つ
-        # 失敗したらここでタイムアウトエラーになり止まる
+        click_strict(driver, ".btn-primary")
+        
         print("   画面遷移待ち...")
         try:
-            # リスト画面(div.list) または 詳細画面(coolantGauge1) のどちらかが出るはず
             WebDriverWait(driver, 10).until(
                 EC.presence_of_element_located((By.CSS_SELECTOR, "div.list, #coolantGauge1, body"))
             )
         except:
             raise Exception("ログイン後の画面遷移に失敗しました")
-            
+        
         print("   ログイン成功確認")
 
-        # 2. 車両選択
+        # --- [2] 車両選択 (常にリストトップを選択) ---
         print("\n--- [2] 車両選択 ---")
-        # すでに詳細画面にいるかチェック
         if len(driver.find_elements(By.ID, "coolantGauge1")) > 0:
              print("   すでに詳細画面です")
         else:
-             # リストの一番上をクリック
              print("   リストの一番上を選択します")
              try:
-                 # リスト内の最初のリンク(aタグ)を探してクリック
                  top_link = WebDriverWait(driver, 10).until(
                      EC.element_to_be_clickable((By.XPATH, "(//a[contains(@href, 'html')])[1] | (//div[contains(@class,'list')]//a)[1]"))
                  )
                  top_link.click()
              except:
-                 raise Exception("車両リストが見つかりません、またはクリックできません")
+                 raise Exception("車両リストのクリックに失敗しました")
 
-        # 詳細画面が開いたことを確認（必須要素: タイヤ入力欄など）
-        find_strict(driver, "#tireType1, #coolantGauge1")
         take_screenshot(driver, "01_VehicleSelected")
 
-        # 3. データ取得
+        # --- [3] データ取得 (常に問い合わせる) ---
         print("\n--- [3] GASデータ取得 ---")
-        res = requests.get(f"{GAS_API_URL}?plate={target_plate}&check=1")
-        tire_data = res.json()
-        if not tire_data.get("ok"):
-             # データがないなら止めるべきか？今回はデフォルト値で進むが警告は出す
-             print("WARNING: GASからのデータ取得に失敗、またはデータなし")
+        tire_data = {}
+        try:
+            # 空文字でもそのまま投げる（GAS側で処理、もしくはエラーならexceptでデフォルトへ）
+            res = requests.get(f"{GAS_API_URL}?plate={target_plate}&check=1")
+            j = res.json()
+            if j.get("ok"):
+                tire_data = j
+        except:
+            print("   通信エラーまたはデータなし（デフォルト値を使用）")
 
-        # 4. 入力実行 (Fail Fast)
+        # --- [4] 入力実行 (データの有無に関わらず処理は同じ) ---
         print("\n--- [4] 入力実行 ---")
         
-        # 点検項目
         click_strict(driver, "coolantGauge1")
         click_strict(driver, "engineOilGauge1")
-        click_strict(driver, "washerFluidGauge1") # ウォッシャー液
+        click_strict(driver, "washerFluidGauge1")
 
-        # タイヤ入力
-        if tire_data:
-            click_strict(driver, "tireType1")
+        click_strict(driver, "tireType1")
+        
+        # 値があればそれを使用、なければデフォルト (分岐不要)
+        input_strict(driver, "tireFrontRegularPressure", tire_data.get("std_f", "240"))
+        input_strict(driver, "tireRearRegularPressure", tire_data.get("std_r", "240"))
+        
+        prev = tire_data.get("prev", {})
+        wheels = [("rf", "FrontRightCm"), ("lf", "FrontLeftCm"), ("lr", "RearLeftBi4"), ("rr", "RearRightBi4")]
+        
+        for pre, suf in wheels:
+            # 製造週
+            week = str(prev.get(f"dot_{pre}", "0123"))
+            if len(week)==3: week = "0"+week
+            input_strict(driver, f"tireMfr{suf}", week)
             
-            # 規定値
-            input_strict(driver, "tireFrontRegularPressure", tire_data.get("std_f", "240"))
-            input_strict(driver, "tireRearRegularPressure", tire_data.get("std_r", "240"))
+            # 溝
+            depth = str(prev.get(f"tread_{pre}", "5.5"))
+            ip, fp = (depth.split(".") + ["0"])[0:2]
+            input_strict(driver, f"tireGroove{suf}Ip", ip)
+            input_strict(driver, f"tireGroove{suf}Fp", fp[0])
             
-            # 測定値
-            prev = tire_data.get("prev", {})
-            wheels = [("rf", "FrontRightCm"), ("lf", "FrontLeftCm"), ("lr", "RearLeftBi4"), ("rr", "RearRightBi4")]
-            
-            for pre, suf in wheels:
-                # 製造週 (必須)
-                week = str(prev.get(f"dot_{pre}", "0123")) # なければダミー値でテスト
-                if len(week)==3: week = "0"+week
-                input_strict(driver, f"tireMfr{suf}", week)
-                
-                # 溝
-                depth = str(prev.get(f"tread_{pre}", "5.5"))
-                ip, fp = (depth.split(".") + ["0"])[0:2]
-                input_strict(driver, f"tireGroove{suf}Ip", ip)
-                input_strict(driver, f"tireGroove{suf}Fp", fp[0])
-                
-                # 空気圧
-                press = str(prev.get(f"pre_{pre}", "240"))
-                input_strict(driver, f"tirePressure{suf}", press)
-                input_strict(driver, f"tirePressureAdjusted{suf}", press)
+            # 空気圧
+            press = str(prev.get(f"pre_{pre}", "240"))
+            input_strict(driver, f"tirePressure{suf}", press)
+            input_strict(driver, f"tirePressureAdjusted{suf}", press)
 
-            click_strict(driver, "tireDamage1")
+        click_strict(driver, "tireDamage1")
 
-        # 入力結果の証拠
         take_screenshot(driver, "02_InputResult")
 
         # その他項目
@@ -214,39 +187,26 @@ def main():
             "engineCondition1", "brakeCondition1", "parkingBrakeCondition1", 
             "washerSprayCondition1", "wiperWipeCondition1", "interiorDirt01", "exteriorDirt02"
         ]
-        # 存在するものだけクリック（画面遷移によっては無いものもあるため、ここは柔軟にするが、エラーならわかるように）
         for i in ids_ok:
             try:
                 driver.find_element(By.ID, i).click()
             except:
-                pass # チェックボックス系は画面外などで失敗しやすいので、今回はSkip許容（メイン入力ではないため）
+                pass 
 
-        # 5. 完了処理
+        # --- [5] 完了処理 ---
         print("\n--- [5] 完了処理 ---")
-        
-        # JSで完了関数を呼ぶ（これが一番確実）
-        driver.execute_script("if(typeof completeTask === 'function') completeTask('daily');")
-        time.sleep(1)
-        driver.execute_script("if(typeof completeTask === 'function') completeTask('interior');")
-        time.sleep(1)
-        driver.execute_script("if(typeof completeTask === 'function') completeTask('wash');")
-        time.sleep(1)
-        driver.execute_script("if(typeof completeTask === 'function') completeTask('exterior');")
-        time.sleep(1)
-        driver.execute_script("if(typeof completeTask === 'function') completeTask('lend');")
-        time.sleep(2)
+        tasks = ['daily', 'interior', 'wash', 'exterior', 'lend']
+        for t in tasks:
+            driver.execute_script(f"if(typeof completeTask === 'function') completeTask('{t}');")
+            time.sleep(1)
 
         take_screenshot(driver, "03_PreComplete")
         
-        # 完了ボタン
         try:
-            # a.is-complete または ボタンを探す
             finish_btn = WebDriverWait(driver, 5).until(
                 EC.element_to_be_clickable((By.CSS_SELECTOR, "a.is-complete, .btn-complete"))
             )
             finish_btn.click()
-            
-            # アラート承認
             WebDriverWait(driver, 3).until(EC.alert_is_present()).accept()
             print("   完了アラート承認")
         except:
@@ -257,7 +217,6 @@ def main():
     except Exception as e:
         print(f"\n[!!!] CRITICAL ERROR [!!!]\n{e}")
         take_screenshot(driver, "FATAL_ERROR")
-        # ここで例外を再送出することで、GitHub Actionsを「赤色（Failure）」にする
         raise e 
     finally:
         driver.quit()
