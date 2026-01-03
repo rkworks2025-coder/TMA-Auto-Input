@@ -123,13 +123,12 @@ def main():
         # --- [2] 車両リスト選択 & ポップアップ開始 ---
         print("\n--- [2] 車両リスト選択 & 開始ポップアップ ---")
         try:
-            # ★【修正箇所】reserve.htmlの構造に合わせてXPathを変更
-            # <a>タグは<table>の中ではなく、<div class="other-btn-area">の中にあるため修正
+            # reserve.htmlの構造に合わせてXPath
             inspection_btn_xpath = "(//div[contains(@class, 'other-btn-area')]//a[contains(text(), '点検')])[1]"
             click_strict(driver, inspection_btn_xpath)
             print("   リスト選択: 『点検』ボタンをクリック")
 
-            # ★【修正箇所】ポップアップが表示されるのを待機してからボタンを押す
+            # ポップアップが表示されるのを待機
             print("   ポップアップ: 表示待機中...")
             WebDriverWait(driver, 5).until(
                 EC.visibility_of_element_located((By.ID, "posupMessageConfirm"))
@@ -141,7 +140,6 @@ def main():
 
         except Exception as e:
              take_screenshot(driver, "ERROR_ReservePopup")
-             # エラー内容を詳細に表示
              raise Exception(f"車両リスト選択後のポップアップ処理に失敗しました: {e}")
 
         # --- [2.5] トップ画面 (点検開始処理) ---
@@ -149,21 +147,27 @@ def main():
         # index.html に遷移
         try:
             # 1. 黄色い「開始」ボタン (点検開始) を押す
-            start_check_xpath = "//input[@value='開始'] | //button[contains(text(),'開始')]"
-            click_strict(driver, start_check_xpath)
+            # 構造: <div id="startBtnContainer"><div ...><a ...><span>開始</span></a></div></div>
+            # inputやbuttonタグではないため、CSSセレクタでaタグを狙う
+            print("   トップ画面: 『点検開始』ボタンを探します...")
+            click_strict(driver, "#startBtnContainer a")
             print("   トップ画面: 『点検開始』ボタン押下 -> リロード待機")
             
-            time.sleep(3) # リロード待ち
+            # 2. リロード待ち & 「日常点検」ボタンの有効化待ち
+            # リロード前は #dailyBtnContainer p.disable だが、リロード後は #dailyBtnContainer a になる
+            print("   トップ画面: 『日常点検』ボタンが有効になるのを待機...")
+            WebDriverWait(driver, 10).until(
+                EC.element_to_be_clickable((By.CSS_SELECTOR, "#dailyBtnContainer a"))
+            )
+            time.sleep(1) # 念のため一呼吸
 
-            # 2. 「日常点検」の横の「点検」ボタンを押す
-            # "日常点検" という文字を含む行の、"点検" ボタン
-            daily_check_btn_xpath = "//tr[contains(.,'日常点検')]//a[contains(text(),'点検')] | //div[contains(.,'日常点検')]//a[contains(text(),'点検')]"
-            click_strict(driver, daily_check_btn_xpath)
+            # 3. 「日常点検」ボタンを押す
+            click_strict(driver, "#dailyBtnContainer a")
             print("   トップ画面: 『日常点検』へ移動")
             
-        except:
+        except Exception as e:
             take_screenshot(driver, "ERROR_IndexPage")
-            raise Exception("トップ画面での『点検開始』または『日常点検』ボタンのクリックに失敗しました")
+            raise Exception(f"トップ画面での『点検開始』または『日常点検』への遷移に失敗しました: {e}")
 
         # --- [3] 日常点検画面 (タブ切り替え & データ入力) ---
         print("\n--- [3] 日常点検 & GASデータ取得 ---")
@@ -178,6 +182,7 @@ def main():
         # ★タブ切り替え: 「エンジンルーム」タブがデフォルトになったので、「タイヤ」への切り替えが必要
         try:
             print("   タブ切り替え: タイヤ/足回りタブを探します")
+            # daily_check.html の構造に合わせて修正
             tab_xpath = "//div[contains(@class,'tab-button')][contains(.,'タイヤ')] | //li[contains(text(),'タイヤ')] | //a[contains(text(),'タイヤ')]"
             
             # タブが存在するか確認してからクリック
@@ -276,8 +281,6 @@ def main():
     except Exception as e:
         print(f"\n[!!!] CRITICAL ERROR [!!!]\n{e}")
         take_screenshot(driver, "FATAL_ERROR")
-        # raise e 
-        # Actionsを失敗扱いにしたい場合は raise e を生かす
         sys.exit(1)
     finally:
         driver.quit()
