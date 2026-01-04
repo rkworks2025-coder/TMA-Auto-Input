@@ -4,6 +4,7 @@ import time
 import datetime
 import json
 import requests
+import re
 from selenium import webdriver
 from selenium.webdriver.chrome.options import Options
 from selenium.webdriver.chrome.service import Service
@@ -99,7 +100,7 @@ def select_radio_strict(driver, name_attr, value):
         raise Exception(f"ラジオボタン選択失敗: {name_attr}={value}") from e
 
 def wait_for_index(driver):
-    """一覧画面に戻るのを待機 (本番:search / テスト:index 両対応)"""
+    """一覧画面(詳細トップ)に戻るのを待機 (本番:search / テスト:index 両対応)"""
     print("   一覧画面への遷移を待機中(search/index)...")
     try:
         # 正規表現で search または index がURLに含まれるのを待つ
@@ -114,7 +115,7 @@ def wait_for_index(driver):
 # メイン処理
 # ==========================================
 def main():
-    print("=== Automation Start (Hybrid URL Check) ===")
+    print("=== Automation Start (Detail Page Flow) ===")
 
     if len(sys.argv) < 2:
         print("Error: No payload provided.")
@@ -150,16 +151,16 @@ def main():
         input_strict(driver, "#cardNo1", id_parts[0])
         input_strict(driver, "#cardNo2", id_parts[1])
         input_strict(driver, "#password", TMA_PW)
-        click_strict(driver, ".btn-primary") # または input[type='submit']
+        click_strict(driver, ".btn-primary")
         
-        # --- [1.5] メニュー回避 (元のロジック維持) ---
+        # --- [1.5] メニュー回避 ---
         print("\n--- [1.5] メニュー画面遷移 ---")
         try:
              click_strict(driver, "//main//a[contains(@href,'reserve')] | //main//button[contains(text(),'予約履歴')]")
         except:
              pass 
 
-        # --- [2] 車両リスト選択 & ポップアップ (元のロジック維持) ---
+        # --- [2] 車両リスト選択 & ポップアップ ---
         print("\n--- [2] 車両リスト選択 & 開始ポップアップ ---")
         inspection_btn_xpath = f"//td[contains(text(), '{target_plate}')]/..//a[contains(text(), '点検')]"
         
@@ -186,41 +187,35 @@ def main():
         time.sleep(1) 
         click_strict(driver, "#dailyBtnContainer a")
         
-        # --- [3] 日常点検入力 (修正:data-name使用) ---
+        # --- [3] 日常点検入力 (data-name使用) ---
         print("\n--- [3] 入力実行: 日常点検 ---")
         WebDriverWait(driver, 10).until(EC.presence_of_element_located((By.TAG_NAME, "body")))
 
-        # 1. エンジンルーム (Tab: engine)
+        # 1. エンジンルーム
         print("   [Step 1] エンジンルーム")
         click_strict(driver, "div[data-name='engine']") 
         
-        # [cite_start]定義書[cite: 35-52]及びdaily_check.html準拠
-        select_radio_strict(driver, "coolantGauge", "2")       # 冷却水量: OK(未補充)
-        select_radio_strict(driver, "engineOilGauge", "1")     # エンジンオイル量
-        select_radio_strict(driver, "brakeFluidGauge", "1")    # ブレーキ液量
-        select_radio_strict(driver, "washerFluidGauge", "2")   # ウォッシャー液量: OK(未補充)
+        select_radio_strict(driver, "coolantGauge", "2")
+        select_radio_strict(driver, "engineOilGauge", "1")
+        select_radio_strict(driver, "brakeFluidGauge", "1")
+        select_radio_strict(driver, "washerFluidGauge", "2")
 
-        # 2. タイヤ (Tab: tire)
+        # 2. タイヤ
         print("   [Step 2] タイヤ")
         click_strict(driver, "div[data-name='tire']")
         
         select_radio_strict(driver, "tireType", "1")
         select_radio_strict(driver, "tireDamage", "1")
 
-        # タイヤデータ入力 (RF->LF->LR->RR)
         wheels = [
-            ('rf', 'FrontRightCm'), 
-            ('lf', 'FrontLeftCm'), 
-            ('lr', 'RearLeftBi4'), 
-            ('rr', 'RearRightBi4')
+            ('rf', 'FrontRightCm'), ('lf', 'FrontLeftCm'), 
+            ('lr', 'RearLeftBi4'), ('rr', 'RearRightBi4')
         ]
 
         for pos, suffix in wheels:
             d = tire_data.get(pos, {})
-            # 週
             input_strict(driver, f"input[name='tireMfr{suffix}']", d.get('week', ''))
             
-            # 溝 (整数・小数)
             depth_str = str(d.get('depth', '5.5'))
             if '.' in depth_str:
                 ip, fp = depth_str.split('.')
@@ -230,25 +225,22 @@ def main():
             input_strict(driver, f"input[name='tireGroove{suffix}Ip']", ip)
             input_strict(driver, f"input[name='tireGroove{suffix}Fp']", fp)
             
-            # 空気圧
             press = d.get('press', '')
             input_strict(driver, f"input[name='tirePressure{suffix}']", press)
             input_strict(driver, f"input[name='tirePressureAdjusted{suffix}']", press)
 
-        # 3. 動作確認 (Tab: motion)
+        # 3. 動作確認
         print("   [Step 3] 動作確認")
         click_strict(driver, "div[data-name='motion']")
-        
         select_radio_strict(driver, "engineCondition", "1")
         select_radio_strict(driver, "brakeCondition", "1")
         select_radio_strict(driver, "parkingBrakeCondition", "1")
         select_radio_strict(driver, "washerSprayCondition", "1")
         select_radio_strict(driver, "wiperWipeCondition", "1")
 
-        # 4. 車載品 - 運転席 (Tab: in-car)
+        # 4. 車載品 - 運転席
         print("   [Step 4] 車載品 - 運転席")
         click_strict(driver, "div[data-name='in-car']")
-        
         select_radio_strict(driver, "inspectionCertificateExist", "1")
         select_radio_strict(driver, "inspectionStickerExist", "1")
         select_radio_strict(driver, "autoLiabilityExist", "1")
@@ -256,49 +248,43 @@ def main():
         select_radio_strict(driver, "roomStickerExist", "1")
         select_radio_strict(driver, "deodorantsExist", "1")
 
-        # 5. 装備確認 (Tab: equipment)
+        # 5. 装備確認
         print("   [Step 5] 装備確認")
         click_strict(driver, "div[data-name='equipment']")
-        
         select_radio_strict(driver, "backMonitor", "1")
         select_radio_strict(driver, "cornerSensor", "1")
         select_radio_strict(driver, "brakeSupport", "1")
         select_radio_strict(driver, "laneDevianceAlert", "1")
         select_radio_strict(driver, "driveRecorder", "1")
 
-        # 6. 灯火装置 (Tab: light)
+        # 6. 灯火装置
         print("   [Step 6] 灯火装置")
         click_strict(driver, "div[data-name='light']")
-        
         select_radio_strict(driver, "turnSignal", "1")
         
-        # 7. 車両周り他 (Tab: perimeter)
+        # 7. 車両周り他
         print("   [Step 7] 車両周り他")
         click_strict(driver, "div[data-name='perimeter']")
-
         select_radio_strict(driver, "fuelCap", "1")
         select_radio_strict(driver, "carStickerExist", "1")
 
-        # 8. 車載品 - トランク (Tab: trunk)
-        # HTML属性 data-name='trunk' を指定して遷移
+        # 8. 車載品 - トランク
         print("   [Step 8] 車載品 - トランク")
         click_strict(driver, "div[data-name='trunk']")
-
         select_radio_strict(driver, "warningTrianglePlateDamage", "1")
         select_radio_strict(driver, "puncRepairKitExist", "1")
         select_radio_strict(driver, "cleaningKit", "1")
 
-        # 一時保存 (HTML: <a class="is-stop" ...>)
+        # 一時保存
         print("   一時保存をクリック...")
         click_strict(driver, ".is-stop")
         wait_for_index(driver)
 
         
-        # --- [4] 車内清掃フェーズ ---
+        # --- [4] 車内清掃フェーズ (修正: ID指定でボタンをクリック) ---
         print("\n--- [4] 車内清掃フェーズ ---")
-        row_xpath = f"//td[contains(text(), '{target_plate}')]/.."
-        btn_xpath = f"{row_xpath}//a[contains(@href, 'InteriorCleaning') or contains(text(), '車内清掃')]"
-        click_strict(driver, btn_xpath)
+        # index.html の #interiorBtnContainer 内のリンクをクリック
+        click_strict(driver, "#interiorBtnContainer a")
 
         select_radio_strict(driver, "interiorDirt", "1")
         select_radio_strict(driver, "interiorCheckTrouble", "1")
@@ -308,22 +294,20 @@ def main():
         click_strict(driver, "//input[@value='完了'] | //button[contains(text(), '完了')] | .is-complete")
         wait_for_index(driver)
 
-        # --- [5] 洗車フェーズ ---
+        # --- [5] 洗車フェーズ (修正: ID指定でボタンをクリック) ---
         print("\n--- [5] 洗車フェーズ ---")
-        row_xpath = f"//td[contains(text(), '{target_plate}')]/.."
-        btn_xpath = f"{row_xpath}//a[contains(@href, 'CarWash') or contains(text(), '洗車')]"
-        click_strict(driver, btn_xpath)
+        # index.html の #washBtnContainer 内のリンクをクリック
+        click_strict(driver, "#washBtnContainer a")
 
         select_radio_strict(driver, "exteriorDirt", "2") # 洗車不要
 
         click_strict(driver, "//input[@value='完了'] | //button[contains(text(), '完了')] | .is-complete")
         wait_for_index(driver)
 
-        # --- [6] 外装確認フェーズ ---
+        # --- [6] 外装確認フェーズ (修正: ID指定でボタンをクリック) ---
         print("\n--- [6] 外装確認フェーズ ---")
-        row_xpath = f"//td[contains(text(), '{target_plate}')]/.."
-        btn_xpath = f"{row_xpath}//a[contains(@href, 'ExteriorCheck') or contains(text(), '外装')]"
-        click_strict(driver, btn_xpath)
+        # index.html の #exteriorBtnContainer 内のリンクをクリック
+        click_strict(driver, "#exteriorBtnContainer a")
 
         select_radio_strict(driver, "exteriorState", "1")
 
