@@ -29,16 +29,38 @@ EVIDENCE_DIR = "evidence"
 # 厳格な操作関数群 (Fail Fast)
 # ==========================================
 def get_chrome_driver():
+    """
+    GitHub Actions等のCI環境でのバージョン不一致エラーを回避する
+    堅牢なドライバー取得ロジック
+    """
     options = Options()
-    # options.add_argument('--headless') # デバッグ時はヘッドレスを解除して動きを見ると良い
+    # ヘッドレスモード設定（GitHub Actionsでは必須）
+    options.add_argument('--headless') 
     options.add_argument('--no-sandbox')
     options.add_argument('--disable-dev-shm-usage')
-    options.add_argument('--window-size=1200,1000') # タブが見える程度の幅を確保
+    options.add_argument('--window-size=1920,1080')
     options.add_argument('--disable-gpu')
     options.add_argument('--user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/96.0.4664.110 Safari/537.36')
     
-    service = Service(ChromeDriverManager().install())
-    return webdriver.Chrome(service=service, options=options)
+    # 1. まずは webdriver_manager での取得を試みる
+    try:
+        print("   [Driver] webdriver_managerでセットアップを試みます...")
+        service = Service(ChromeDriverManager().install())
+        driver = webdriver.Chrome(service=service, options=options)
+        print("   [Driver] 成功: webdriver_manager")
+        return driver
+    except Exception as e:
+        print(f"   [Driver] webdriver_manager 失敗: {e}")
+        print("   [Driver] システムインストール済みのドライバーで再試行します...")
+
+    # 2. 失敗した場合、環境パス(PATH)にある chromedriver を使用する (GitHub Actionsのプリインストール版など)
+    try:
+        driver = webdriver.Chrome(options=options)
+        print("   [Driver] 成功: System Path Driver")
+        return driver
+    except Exception as e:
+        print(f"   [Driver] 致命的エラー: ドライバーを起動できませんでした。\n{e}")
+        raise e
 
 def take_screenshot(driver, name):
     if not os.path.exists(EVIDENCE_DIR):
@@ -112,10 +134,6 @@ def switch_tab(driver, tab_data_name):
         # コンテンツが表示されるまで少し待つ（アニメーション考慮）
         time.sleep(1.0)
         
-        # 対応するコンテンツがアクティブになったか確認（オプション）
-        # content_id = tab_data_name # 基本的にIDとdata-nameは同じルール
-        # WebDriverWait(driver, 5).until(EC.visibility_of_element_located((By.ID, content_id)))
-        
     except Exception as e:
         take_screenshot(driver, f"ERROR_TabSwitch_{tab_data_name}")
         raise Exception(f"タブ切り替え失敗: {tab_data_name} \n{e}")
@@ -130,9 +148,9 @@ def main():
     target_url = sys.argv[1] if len(sys.argv) > 1 else DEFAULT_LOGIN_URL
     print(f"Target URL: {target_url}")
 
-    driver = get_chrome_driver()
-
     try:
+        driver = get_chrome_driver()
+        
         driver.get(target_url)
         time.sleep(2)
 
@@ -146,16 +164,10 @@ def main():
             click_strict(driver, ".btn-primary")
             time.sleep(3)
 
-            # メニュー -> 予約履歴 -> 点検開始 のフロー（省略せず実装する場合はここに記述）
-            # 今回は「ダミーHTML直接」または「ログイン後のページ」を想定して柔軟に進む
-            
-            # (必要であればここにメニュー遷移ロジックを再実装)
-
         # --- [3] 日常点検データ取得 & 入力 ---
         print("\n--- [3] 日常点検 & GASデータ取得 ---")
         
         # GASからデータ取得（車両番号が必要だが、今回はダミー用に固定値または仮定）
-        # 本番では画面上のナンバープレートを読み取る等の処理が必要
         tire_data = {}
         # target_plate = "相模 7725" # ダミーHTML上のナンバー
         # try:
@@ -190,8 +202,6 @@ def main():
             input_strict(driver, "tireRearRegularPressure", tire_data.get("std_r", "240"))
             
             # 4輪ループ処理 (右前 -> 左前 -> 左後 -> 右後)
-            # HTML IDのSuffixと、GASデータのキーのマッピング
-            # 仕様書の順序: 右前(FrontRightCm), 左前(FrontLeftCm), 左後(RearLeftBi4), 右後(RearRightBi4)
             wheels = [
                 ("rf", "FrontRightCm"), 
                 ("lf", "FrontLeftCm"), 
@@ -209,17 +219,8 @@ def main():
                 input_strict(driver, f"tireMfr{suf}", week)
                 
                 # 亀裂損傷 (OK=1)
-                # 仕様書上は name="tireDamage" だが、各タイヤセクションにIDがあるか確認
-                # ダミーHTMLではID: tireDamage1 が複数あるわけではなく、1セットのみの可能性が高い
-                # ★重要: ダミーHTMLを見る限り、tireDamage1は「各タイヤごと」ではなく「ページ全体で1つ」または「name属性は同じだがIDが重複？」
-                # ソースコード検証結果: 各セクションに name="tireDamage" があるが、IDは tireDamage1, tireDamage2 となっている。
-                # HTMLの仕様上、ID重複は違反だが、Seleniumは最初の1つをつかむ。
-                # ダミーHTML 297行目: tireDamage1 (これは最初のセクション用)
-                # 実はタイヤごとの亀裂チェックIDがHTML上で一意になっていない可能性がある。
-                # CSSセレクタで親要素を指定してクリックする戦略をとる。
-                
-                # 暫定: 最初の1つだけ押す（仕様書上も「HTML上の実体は1つのみ」と記述あり）
-                if pre == "rf": # 最初のループでのみ押す
+                # 暫定: 最初の1つだけ押す
+                if pre == "rf": 
                     click_strict(driver, "tireDamage1")
 
                 # 溝 (Ip=整数, Fp=小数)
@@ -342,7 +343,8 @@ def main():
     finally:
         # 確認のために少し待ってから閉じる
         time.sleep(5)
-        driver.quit()
+        if 'driver' in locals():
+            driver.quit()
 
 if __name__ == "__main__":
     main()
