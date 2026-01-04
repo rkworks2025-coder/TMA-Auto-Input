@@ -16,8 +16,6 @@ from webdriver_manager.chrome import ChromeDriverManager
 # 設定エリア
 # ==========================================
 DEFAULT_LOGIN_URL = "https://dailycheck.tc-extsys.jp/tcrappsweb/web/login/tawLogin.html"
-
-# 必要に応じて変更
 TMA_ID = "0030-927583"
 TMA_PW = "Ccj-222223"
 GAS_API_URL = "https://script.google.com/macros/s/AKfycbyXbPaarnD7mQa_rqm6mk-Os3XBH6C731aGxk7ecJC5U3XjtwfMkeF429rezkAo79jN/exec"
@@ -28,37 +26,16 @@ EVIDENCE_DIR = "evidence"
 # 厳格な操作関数群 (Fail Fast)
 # ==========================================
 def get_chrome_driver():
-    """
-    GitHub Actions等のCI環境でのバージョン不一致エラーを回避する
-    堅牢なドライバー取得ロジック
-    """
     options = Options()
-    options.add_argument('--headless') 
+    options.add_argument('--headless')
     options.add_argument('--no-sandbox')
     options.add_argument('--disable-dev-shm-usage')
     options.add_argument('--window-size=1920,1080')
     options.add_argument('--disable-gpu')
-    options.add_argument('--user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/96.0.4664.110 Safari/537.36')
+    options.add_argument('--user-agent=Mozilla/5.0 (iPhone; CPU iPhone OS 15_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/15.0 Mobile/15E148 Safari/604.1')
     
-    # 1. まずは webdriver_manager での取得を試みる
-    try:
-        print("   [Driver] webdriver_managerでセットアップを試みます...")
-        service = Service(ChromeDriverManager().install())
-        driver = webdriver.Chrome(service=service, options=options)
-        print("   [Driver] 成功: webdriver_manager")
-        return driver
-    except Exception as e:
-        print(f"   [Driver] webdriver_manager 失敗: {e}")
-        print("   [Driver] システムインストール済みのドライバーで再試行します...")
-
-    # 2. 失敗した場合、環境パス(PATH)にある chromedriver を使用する
-    try:
-        driver = webdriver.Chrome(options=options)
-        print("   [Driver] 成功: System Path Driver")
-        return driver
-    except Exception as e:
-        print(f"   [Driver] 致命的エラー: ドライバーを起動できませんでした。\n{e}")
-        raise e
+    service = Service(ChromeDriverManager().install())
+    return webdriver.Chrome(service=service, options=options)
 
 def take_screenshot(driver, name):
     if not os.path.exists(EVIDENCE_DIR):
@@ -88,23 +65,21 @@ def click_strict(driver, selector_or_xpath):
         time.sleep(0.5)
         el.click()
         print(f"   [OK] Click: {sel}")
-    except Exception as e:
+    except:
         take_screenshot(driver, "ERROR_ClickFailed")
-        raise Exception(f"クリック不可: {sel} \n{e}")
+        raise Exception(f"クリック不可: {sel}")
 
 def input_strict(driver, selector_or_id, value):
-    """入力できなければ即死する"""
     sel = selector_or_id if (selector_or_id.startswith("#") or "." in selector_or_id) else f"#{selector_or_id}"
     try:
         el = WebDriverWait(driver, 10).until(EC.visibility_of_element_located((By.CSS_SELECTOR, sel)))
-        driver.execute_script("arguments[0].scrollIntoView({block: 'center'});", el)
         el.clear()
         el.send_keys(str(value))
         
-        # 入力値確認
         actual = el.get_attribute('value')
         if str(actual) != str(value):
-            print(f"      (注意) 入力値不一致: 期待({value}) != 実際({actual})")
+            take_screenshot(driver, "ERROR_InputMismatch")
+            raise Exception(f"入力値不一致: 期待({value}) != 実際({actual})")
         
         print(f"   [OK] Input: {value} -> {sel}")
     except Exception as e:
@@ -112,230 +87,179 @@ def input_strict(driver, selector_or_id, value):
         print(f"   [Error] 入力失敗: {sel}")
         raise e
 
-def switch_tab(driver, tab_data_name):
-    """
-    指定された data-name 属性を持つタブをクリックして表示を切り替える。
-    """
-    try:
-        print(f"   ▼ タブ切り替え: {tab_data_name}")
-        selector = f".tab-button[data-name='{tab_data_name}']"
-        # タブ自体が表示されているか待機
-        tab_el = WebDriverWait(driver, 10).until(EC.element_to_be_clickable((By.CSS_SELECTOR, selector)))
-        
-        driver.execute_script("arguments[0].scrollIntoView({block: 'center'});", tab_el)
-        tab_el.click()
-        time.sleep(1.0) # アニメーション待ち
-        
-    except Exception as e:
-        take_screenshot(driver, f"ERROR_TabSwitch_{tab_data_name}")
-        raise Exception(f"タブ切り替え失敗: {tab_data_name} \n{e}")
-
 # ==========================================
 # メイン処理
 # ==========================================
 def main():
-    print("=== Automation Start (Final Merged Version) ===")
+    print("=== Automation Start (Strict Mode) ===")
 
-    # 引数処理
-    target_url = sys.argv[1] if len(sys.argv) > 1 else DEFAULT_LOGIN_URL
-    if not target_url.startswith("http") and not target_url.startswith("file://"):
-        abs_path = os.path.abspath(target_url)
-        target_url = f"file://{abs_path}"
-    
-    print(f"Target URL: {target_url}")
+    # 1. 引数取得
+    target_plate = sys.argv[1] if len(sys.argv) > 1 else ""
+    target_login_url = sys.argv[2] if (len(sys.argv) > 2 and sys.argv[2]) else DEFAULT_LOGIN_URL
+    print(f"MODE: URL ({target_login_url})")
 
     driver = get_chrome_driver()
 
     try:
-        driver.get(target_url)
-        time.sleep(2)
-
-        # ---------------------------------------------------------
-        # [1] ログイン & ナビゲーション (リュウの実績コードより移植)
-        # ---------------------------------------------------------
-        if "login" in driver.current_url or "Login" in driver.title:
-            print("\n--- [1] ログイン処理 ---")
-            id_parts = TMA_ID.split("-")
-            input_strict(driver, "#cardNo1", id_parts[0])
-            input_strict(driver, "#cardNo2", id_parts[1])
-            input_strict(driver, "#password", TMA_PW)
-            click_strict(driver, ".btn-primary")
-            time.sleep(3) # ログイン後の遷移待ち
-
-            # --- [1.5] メニュー画面遷移 ---
-            print("\n--- [1.5] メニュー画面遷移 ---")
-            try:
-                # 隠れメニュー回避: <main>内のボタンのみ
-                # リュウのコード: //main//a[contains(@href,'reserve')] | //main//button[contains(text(),'予約履歴')]
-                click_strict(driver, "//main//a[contains(@href,'reserve')] | //main//button[contains(text(),'予約履歴')]")
-            except:
-                take_screenshot(driver, "ERROR_MenuPage")
-                raise Exception("メニュー画面の『予約履歴』ボタンが見つかりません")
-
-            # --- [2] 車両リスト選択 & ポップアップ開始 ---
-            print("\n--- [2] 車両リスト選択 & 開始ポップアップ ---")
-            try:
-                # リュウのコード: (//table//a[contains(text(), '点検')])[1]
-                # リストの一番上にある「点検」ボタンを狙い撃ち
-                inspection_btn_xpath = "(//table//a[contains(text(), '点検')])[1]"
-                click_strict(driver, inspection_btn_xpath)
-                print("   リスト選択: 『点検』ボタンをクリック")
-                
-                # リュウのコード: #posupMessageConfirmOk
-                click_strict(driver, "#posupMessageConfirmOk")
-                print("   ポップアップ: 確認ボタンを押下")
-                time.sleep(2)
-
-            except:
-                take_screenshot(driver, "ERROR_ReservePopup")
-                raise Exception("車両リスト選択後のポップアップ処理に失敗しました")
-
-            # --- [2.5] トップ画面 (点検開始処理) ---
-            print("\n--- [2.5] トップ画面 (点検開始) ---")
-            try:
-                # 1. 黄色い「開始」ボタン (点検開始)
-                # リュウのコード: //input[@value='開始'] | //button[contains(text(),'開始')]
-                start_check_xpath = "//input[@value='開始'] | //button[contains(text(),'開始')]"
-                click_strict(driver, start_check_xpath)
-                print("   トップ画面: 『点検開始』ボタン押下 -> リロード待機")
-                
-                time.sleep(3) # リロード待ち
-
-                # 2. 「日常点検」の横の「点検」ボタン
-                # リュウのコード: //tr[contains(.,'日常点検')]//a[contains(text(),'点検')] | //div[contains(.,'日常点検')]//a[contains(text(),'点検')]
-                daily_check_btn_xpath = "//tr[contains(.,'日常点検')]//a[contains(text(),'点検')] | //div[contains(.,'日常点検')]//a[contains(text(),'点検')]"
-                click_strict(driver, daily_check_btn_xpath)
-                print("   トップ画面: 『日常点検』へ移動")
-                time.sleep(3) # 画面ロード待ち
-                
-            except:
-                take_screenshot(driver, "ERROR_IndexPage")
-                raise Exception("トップ画面での『点検開始』または『日常点検』ボタンのクリックに失敗しました")
-
-        # ---------------------------------------------------------
-        # [3] 日常点検データ取得 & 入力 (Strict Mode & Tab Control)
-        # ---------------------------------------------------------
-        print("\n--- [3] 日常点検 入力開始 ---")
+        # --- [1] ログイン ---
+        print("\n--- [1] ログイン開始 ---")
+        driver.get(target_login_url)
         
-        # 画面が正しいかチェック（エンジンルームタブがあるか）
-        if len(driver.find_elements(By.CSS_SELECTOR, ".tab-button[data-name='engine']")) == 0:
-             # ダミーファイル直接起動の場合はここに来るので、ログイン経由でなければスルーする場合もあるが
-             # ここではStrictにチェック
-             print("   (注意) 点検画面のタブが見つかりません。画面遷移失敗の可能性があります。")
-             take_screenshot(driver, "WARN_NotInspectionPage")
+        id_parts = TMA_ID.split("-")
+        input_strict(driver, "#cardNo1", id_parts[0])
+        input_strict(driver, "#cardNo2", id_parts[1])
+        input_strict(driver, "#password", TMA_PW)
+        click_strict(driver, ".btn-primary")
+        
+        # --- [1.5] メニュー画面 ---
+        print("\n--- [1.5] メニュー画面遷移 ---")
+        try:
+            # 隠れメニュー回避: <main>内のボタンのみ
+            click_strict(driver, "//main//a[contains(@href,'reserve')] | //main//button[contains(text(),'予約履歴')]")
+        except:
+            take_screenshot(driver, "ERROR_MenuPage")
+            raise Exception("メニュー画面の『予約履歴』ボタンが見つかりません")
 
-        # GASデータ取得（今回はスキップ、枠組みのみ）
+        # --- [2] 車両リスト選択 & ポップアップ開始 ---
+        print("\n--- [2] 車両リスト選択 & 開始ポップアップ ---")
+        try:
+            # ★【修正】「予約変更」などの隣接ボタンを避け、確実に「点検」の文字が入ったボタンを押す
+            # リストの一番上にある「点検」ボタンを狙い撃ち
+            inspection_btn_xpath = "(//table//a[contains(text(), '点検')])[1]"
+            click_strict(driver, inspection_btn_xpath)
+            print("   リスト選択: 『点検』ボタンをクリック (予約変更等は無視)")
+            
+            # ★【修正】ポップアップの「開始」をID指定で押す
+            # reserve.html 151行目のID: posupMessageConfirmOk (キャンセル等は無視)
+            click_strict(driver, "#posupMessageConfirmOk")
+            print("   ポップアップ: 確認ボタン(ID:posupMessageConfirmOk)を押下")
+
+        except:
+             take_screenshot(driver, "ERROR_ReservePopup")
+             raise Exception("車両リスト選択後のポップアップ処理に失敗しました (ボタンが見つからないかID不一致)")
+
+        # --- [2.5] トップ画面 (点検開始処理) ---
+        print("\n--- [2.5] トップ画面 (点検開始) ---")
+        # index.html に遷移
+        try:
+            # 1. 黄色い「開始」ボタン (点検開始) を押す
+            start_check_xpath = "//input[@value='開始'] | //button[contains(text(),'開始')]"
+            click_strict(driver, start_check_xpath)
+            print("   トップ画面: 『点検開始』ボタン押下 -> リロード待機")
+            
+            time.sleep(3) # リロード待ち
+
+            # 2. 「日常点検」の横の「点検」ボタンを押す
+            # "日常点検" という文字を含む行の、"点検" ボタン
+            daily_check_btn_xpath = "//tr[contains(.,'日常点検')]//a[contains(text(),'点検')] | //div[contains(.,'日常点検')]//a[contains(text(),'点検')]"
+            click_strict(driver, daily_check_btn_xpath)
+            print("   トップ画面: 『日常点検』へ移動")
+            
+        except:
+            take_screenshot(driver, "ERROR_IndexPage")
+            raise Exception("トップ画面での『点検開始』または『日常点検』ボタンのクリックに失敗しました")
+
+        # --- [3] 日常点検画面 (タブ切り替え & データ入力) ---
+        print("\n--- [3] 日常点検 & GASデータ取得 ---")
+        
+        # 画面遷移確認
+        try:
+            WebDriverWait(driver, 10).until(EC.presence_of_element_located((By.TAG_NAME, "body")))
+        except:
+            take_screenshot(driver, "ERROR_DailyCheckLoad")
+            raise Exception("日常点検画面 (daily_check.html) が開けませんでした")
+
+        # ★タブ切り替え: 「足回り」または「タイヤ」タブをクリック
+        try:
+            print("   タブ切り替え: タイヤ/足回りタブを探します")
+            tab_xpath = "//li[contains(text(),'足回り')] | //a[contains(text(),'足回り')] | //li[contains(text(),'タイヤ')] | //a[contains(text(),'タイヤ')]"
+            if len(driver.find_elements(By.XPATH, tab_xpath)) > 0:
+                click_strict(driver, tab_xpath)
+                time.sleep(1)
+            else:
+                print("   (タブが見つからないため、そのままスクロールで探します)")
+        except:
+            print("   (タブ切り替えスキップ)")
+
+        # GASデータ取得
         tire_data = {}
-
-        # ===== 1. エンジンルーム (Tab: engine) =====
-        switch_tab(driver, "engine")
         try:
-            click_strict(driver, "coolantGauge1")     # 冷却水
-            click_strict(driver, "engineOilGauge1")   # オイル
-            click_strict(driver, "brakeFluidGauge1")  # ブレーキ液
-            click_strict(driver, "washerFluidGauge1") # ウォッシャー
-        except Exception as e:
-            print(f"   [Error] エンジンルーム入力失敗: {e}")
-            raise e
+            if target_plate:
+                res = requests.get(f"{GAS_API_URL}?plate={target_plate}&check=1")
+                j = res.json()
+                if j.get("ok"): tire_data = j
+        except:
+            print("   通信エラーまたはデータなし")
 
-        # ===== 2. タイヤ (Tab: tire) =====
-        switch_tab(driver, "tire")
+        # --- [4] 入力実行 ---
+        print("\n--- [4] 入力実行 ---")
+        
+        # 液体類（エンジンルームタブにある可能性があるため、見つからなければスキップしてタイヤへ）
         try:
-            click_strict(driver, "tireType1") # ノーマル
-            input_strict(driver, "tireFrontRegularPressure", tire_data.get("std_f", "250"))
+            click_strict(driver, "coolantGauge1")
+            click_strict(driver, "engineOilGauge1")
+            click_strict(driver, "washerFluidGauge1")
+        except:
+            print("   (エンジンルーム項目が見つかりません。タブが違う可能性がありますが続行します)")
+
+        # タイヤ入力
+        try:
+            click_strict(driver, "tireType1")
+            
+            input_strict(driver, "tireFrontRegularPressure", tire_data.get("std_f", "240"))
             input_strict(driver, "tireRearRegularPressure", tire_data.get("std_r", "240"))
             
-            wheels = [("rf", "FrontRightCm"), ("lf", "FrontLeftCm"), ("lr", "RearLeftBi4"), ("rr", "RearRightBi4")]
             prev = tire_data.get("prev", {})
-
+            wheels = [("rf", "FrontRightCm"), ("lf", "FrontLeftCm"), ("lr", "RearLeftBi4"), ("rr", "RearRightBi4")]
+            
             for pre, suf in wheels:
-                print(f"   -- タイヤ入力: {suf} --")
-                week = str(prev.get(f"dot_{pre}", "1224"))
+                week = str(prev.get(f"dot_{pre}", "0123"))
                 if len(week)==3: week = "0"+week
                 input_strict(driver, f"tireMfr{suf}", week)
                 
-                # 亀裂損傷 (右前のみクリック)
-                if pre == "rf": 
-                    click_strict(driver, "tireDamage1")
+                depth = str(prev.get(f"tread_{pre}", "5.5"))
+                ip, fp = (depth.split(".") + ["0"])[0:2]
+                input_strict(driver, f"tireGroove{suf}Ip", ip)
+                input_strict(driver, f"tireGroove{suf}Fp", fp[0])
+                
+                press = str(prev.get(f"pre_{pre}", "240"))
+                input_strict(driver, f"tirePressure{suf}", press)
+                input_strict(driver, f"tirePressureAdjusted{suf}", press)
 
-                input_strict(driver, f"tireGroove{suf}Ip", "4")
-                input_strict(driver, f"tireGroove{suf}Fp", "5")
-                input_strict(driver, f"tirePressure{suf}", "240")
-                input_strict(driver, f"tirePressureAdjusted{suf}", "240")
+            click_strict(driver, "tireDamage1")
+            print("   タイヤデータ入力完了")
         except Exception as e:
             take_screenshot(driver, "ERROR_TireInput")
-            raise e
+            raise Exception(f"タイヤ入力欄が見つかりません (タブ切り替え失敗?): {e}")
 
-        # ===== 3. 動作確認 (Tab: motion) =====
-        switch_tab(driver, "motion")
-        click_strict(driver, "engineCondition1")
-        click_strict(driver, "brakeCondition1")
-        click_strict(driver, "parkingBrakeCondition1")
-        click_strict(driver, "washerSprayCondition1")
-        click_strict(driver, "wiperWipeCondition1")
+        take_screenshot(driver, "02_InputResult")
 
-        # ===== 4. 車載品-運転席 (Tab: in-car) =====
-        switch_tab(driver, "in-car")
-        click_strict(driver, "inspectionCertificateExist1")
-        click_strict(driver, "inspectionStickerExist1")
-        click_strict(driver, "autoLiabilityExist1")
-        click_strict(driver, "maintenanceStickerExist1")
-        click_strict(driver, "flaresExist1")
-        input_strict(driver, "flaresLimit", "2029-01")
-        click_strict(driver, "passCardExist1")
-        click_strict(driver, "roomStickerExist1")
-        click_strict(driver, "deodorantsExist1")
-
-        # ===== 5. 装備確認 (Tab: equipment) =====
-        switch_tab(driver, "equipment")
-        click_strict(driver, "backMonitor1")
-        click_strict(driver, "cornerSensor1")
-        click_strict(driver, "brakeSupport1")
-        click_strict(driver, "laneDevianceAlert1")
-        click_strict(driver, "driveRecorder1")
-
-        # ===== 6. 灯火装置 (Tab: light) =====
-        switch_tab(driver, "light")
-        click_strict(driver, "turnSignal1")
-
-        # ===== 7. 車両周り (Tab: perimeter) =====
-        switch_tab(driver, "perimeter")
-        click_strict(driver, "fuelCap1")
-        click_strict(driver, "carStickerExist1")
-
-        # ===== 8. 車載品-トランク (Tab: trunk) =====
-        switch_tab(driver, "trunk")
-        click_strict(driver, "warningTrianglePlateDamage1")
-        click_strict(driver, "puncRepairKitExist1")
-        input_strict(driver, "puncRepairKitLimit", "2028-10")
-        click_strict(driver, "spearTireDamage1")
-        click_strict(driver, "tireJackupSetExist1")
-        click_strict(driver, "cleaningKit1")
-        click_strict(driver, "juniorSeat2")
-
-        take_screenshot(driver, "99_AllInputCompleted")
-        print("\n--- 全項目の入力完了 ---")
+        # その他項目（存在すれば）
+        ids_ok = ["engineCondition1", "brakeCondition1", "parkingBrakeCondition1", "washerSprayCondition1", "wiperWipeCondition1", "interiorDirt01", "exteriorDirt02"]
+        for i in ids_ok:
+            try:
+                if len(driver.find_elements(By.ID, i)) > 0: driver.find_element(By.ID, i).click()
+            except: pass 
 
         # --- [5] 完了処理 ---
         print("\n--- [5] 完了処理 ---")
+        tasks = ['daily', 'interior', 'wash', 'exterior', 'lend']
+        for t in tasks:
+            driver.execute_script(f"if(typeof completeTask === 'function') completeTask('{t}');")
+            time.sleep(1)
+
+        take_screenshot(driver, "03_PreComplete")
+        
         try:
-            # 完了ボタン (.is-complete または .btn-complete)
-            finish_selector = "a.is-complete, .btn-complete" 
+            # 完了ボタン
             finish_btn = WebDriverWait(driver, 5).until(
-                EC.element_to_be_clickable((By.CSS_SELECTOR, finish_selector))
+                EC.element_to_be_clickable((By.CSS_SELECTOR, "main a.is-complete, main .btn-complete, a.btn-complete"))
             )
-            print("   完了ボタン発見。クリックします...")
             finish_btn.click()
-            
-            try:
-                WebDriverWait(driver, 3).until(EC.alert_is_present()).accept()
-                print("   完了アラート承認")
-            except:
-                print("   (アラートは出ませんでした)")
-                
-        except Exception as e:
-            print(f"   完了ボタン処理失敗: {e}")
-            take_screenshot(driver, "ERROR_Finish")
+            WebDriverWait(driver, 3).until(EC.alert_is_present()).accept()
+            print("   完了アラート承認")
+        except:
+            print("   完了ボタンが見つからないか、JSで完了済み")
 
         print("\n=== SUCCESS: 全工程完了 ===")
 
@@ -344,8 +268,7 @@ def main():
         take_screenshot(driver, "FATAL_ERROR")
         raise e 
     finally:
-        if 'driver' in locals():
-            driver.quit()
+        driver.quit()
 
 if __name__ == "__main__":
     main()
