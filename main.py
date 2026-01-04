@@ -32,12 +32,14 @@ def get_chrome_driver():
     options.add_argument('--disable-dev-shm-usage')
     options.add_argument('--window-size=1920,1080')
     options.add_argument('--disable-gpu')
+    # iPhone 12 Pro Max 風のUser-Agent (少し新しめに調整)
     options.add_argument('--user-agent=Mozilla/5.0 (iPhone; CPU iPhone OS 15_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/15.0 Mobile/15E148 Safari/604.1')
     
     service = Service(ChromeDriverManager().install())
     return webdriver.Chrome(service=service, options=options)
 
 def take_screenshot(driver, name):
+    """証拠画像を保存する"""
     if not os.path.exists(EVIDENCE_DIR):
         os.makedirs(EVIDENCE_DIR)
     timestamp = datetime.datetime.now().strftime('%H%M%S')
@@ -54,7 +56,7 @@ def click_strict(driver, selector_or_xpath):
         by_method = By.XPATH
         sel = selector_or_xpath
     else:
-        by_method = By.CSS_SELECTOR
+        # ID指定やクラス指定の簡易化
         sel = selector_or_xpath if (selector_or_xpath.startswith("#") or "." in selector_or_xpath) else f"#{selector_or_xpath}"
 
     try:
@@ -73,11 +75,15 @@ def click_strict(driver, selector_or_xpath):
 def input_strict(driver, selector_or_id, value):
     """入力できなければ即例外発生（テスト失敗）"""
     sel = selector_or_id if (selector_or_id.startswith("#") or "." in selector_or_id) else f"#{selector_or_id}"
+    
     try:
         el = WebDriverWait(driver, 10).until(EC.visibility_of_element_located((By.CSS_SELECTOR, sel)))
+        # 念のためスクロール
+        driver.execute_script("arguments[0].scrollIntoView({block: 'center'});", el)
         el.clear()
         el.send_keys(str(value))
         
+        # 入力が反映されたか確認（value属性）
         actual = el.get_attribute('value')
         if str(actual) != str(value):
             take_screenshot(driver, "ERROR_InputMismatch")
@@ -175,7 +181,6 @@ def main():
         print("\n--- [4] 入力実行 ---")
         
         # [Step 1] エンジンルーム (デフォルトで開いているはずなので即入力)
-        # ここで見つからなければ、デフォルトタブ設定ミスかページロード不全なので即Failさせる
         print("   [Step 1] エンジンルーム入力...")
         click_strict(driver, "coolantGauge1")
         click_strict(driver, "engineOilGauge1")
@@ -197,18 +202,22 @@ def main():
         input_strict(driver, "tireRearRegularPressure", tire_data.get("std_r", "240"))
         
         prev = tire_data.get("prev", {})
+        # (suffix, ElementID_Part)
         wheels = [("rf", "FrontRightCm"), ("lf", "FrontLeftCm"), ("lr", "RearLeftBi4"), ("rr", "RearRightBi4")]
         
         for pre, suf in wheels:
+            # 製造週
             week = str(prev.get(f"dot_{pre}", "0123"))
             if len(week)==3: week = "0"+week
             input_strict(driver, f"tireMfr{suf}", week)
             
+            # 溝の深さ
             depth = str(prev.get(f"tread_{pre}", "5.5"))
             ip, fp = (depth.split(".") + ["0"])[0:2]
             input_strict(driver, f"tireGroove{suf}Ip", ip)
             input_strict(driver, f"tireGroove{suf}Fp", fp[0])
             
+            # 空気圧
             press = str(prev.get(f"pre_{pre}", "240"))
             input_strict(driver, f"tirePressure{suf}", press)
             input_strict(driver, f"tirePressureAdjusted{suf}", press)
@@ -218,19 +227,18 @@ def main():
 
         take_screenshot(driver, "02_InputResult")
 
-        # [Step 4] その他項目（存在すればクリック、なければ無視してよい項目か要検討だが、今回は「あれば押す」のままにする）
-        # ※ここだけは「ページによってあったりなかったりする」可能性があるため緩くても許容される場合が多いが、
-        #   daily_check.html に確実に存在するものなら strict にすべき。今回は安全策で緩いままにするが、本来は strict 推奨。
+        # [Step 4] その他項目（あれば押す）
         ids_ok = ["engineCondition1", "brakeCondition1", "parkingBrakeCondition1", "washerSprayCondition1", "wiperWipeCondition1", "interiorDirt01", "exteriorDirt02"]
         for i in ids_ok:
             try:
-                if len(driver.find_elements(By.ID, i)) > 0: driver.find_element(By.ID, i).click()
+                if len(driver.find_elements(By.ID, i)) > 0:
+                    driver.find_element(By.ID, i).click()
             except: pass 
 
         # --- [5] 完了処理 ---
         print("\n--- [5] 完了処理 ---")
         
-        # JSによる他タスクの強制完了処理（これは補助的なので維持）
+        # JSによる他タスクの強制完了処理
         tasks = ['daily', 'interior', 'wash', 'exterior', 'lend']
         for t in tasks:
             driver.execute_script(f"if(typeof completeTask === 'function') completeTask('{t}');")
@@ -257,7 +265,6 @@ def main():
     except Exception as e:
         print(f"\n[!!!] CRITICAL ERROR (Test Failed) [!!!]\n{e}")
         take_screenshot(driver, "FATAL_ERROR")
-        # ここで例外を再送出、またはsys.exit(1)することでActionsをRed(失敗)にする
         sys.exit(1)
     finally:
         driver.quit()
