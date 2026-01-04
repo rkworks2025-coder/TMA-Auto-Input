@@ -98,21 +98,12 @@ def select_radio_strict(driver, name_attr, value):
         take_screenshot(driver, f"ERROR_Radio_{name_attr}")
         raise Exception(f"ラジオボタン選択失敗: {name_attr}={value}") from e
 
-def switch_tab(driver, tab_text):
-    """(廃止予定だが互換性のため残す・今回は使用しない)"""
-    xpath = f"//div[contains(@class,'tab-button')][contains(.,'{tab_text}')] | //li[contains(text(),'{tab_text}')] | //a[contains(text(),'{tab_text}')]"
-    try:
-        click_strict(driver, xpath)
-        time.sleep(1.0)
-        print(f"   -> タブ切り替え: {tab_text}")
-    except Exception as e:
-        print(f"   [WARNING] Tab '{tab_text}' click failed.")
-
 def wait_for_index(driver):
-    """一覧画面に戻るのを待機"""
-    print("   一覧画面への遷移を待機中...")
+    """一覧画面に戻るのを待機 (本番:search / テスト:index 両対応)"""
+    print("   一覧画面への遷移を待機中(search/index)...")
     try:
-        WebDriverWait(driver, 20).until(EC.url_contains("search"))
+        # 正規表現で search または index がURLに含まれるのを待つ
+        WebDriverWait(driver, 20).until(EC.url_matches(r"(search|index)"))
         time.sleep(2)
         print("   -> 一覧画面に戻りました")
     except:
@@ -123,7 +114,7 @@ def wait_for_index(driver):
 # メイン処理
 # ==========================================
 def main():
-    print("=== Automation Start (Fix: Tab Logic Only) ===")
+    print("=== Automation Start (Hybrid URL Check) ===")
 
     if len(sys.argv) < 2:
         print("Error: No payload provided.")
@@ -161,14 +152,14 @@ def main():
         input_strict(driver, "#password", TMA_PW)
         click_strict(driver, ".btn-primary") # または input[type='submit']
         
-        # --- [1.5] メニュー回避 ---
+        # --- [1.5] メニュー回避 (元のロジック維持) ---
         print("\n--- [1.5] メニュー画面遷移 ---")
         try:
              click_strict(driver, "//main//a[contains(@href,'reserve')] | //main//button[contains(text(),'予約履歴')]")
         except:
              pass 
 
-        # --- [2] 車両リスト選択 & ポップアップ ---
+        # --- [2] 車両リスト選択 & ポップアップ (元のロジック維持) ---
         print("\n--- [2] 車両リスト選択 & 開始ポップアップ ---")
         inspection_btn_xpath = f"//td[contains(text(), '{target_plate}')]/..//a[contains(text(), '点検')]"
         
@@ -195,7 +186,7 @@ def main():
         time.sleep(1) 
         click_strict(driver, "#dailyBtnContainer a")
         
-        # --- [3] 日常点検入力 (修正箇所) ---
+        # --- [3] 日常点検入力 (修正:data-name使用) ---
         print("\n--- [3] 入力実行: 日常点検 ---")
         WebDriverWait(driver, 10).until(EC.presence_of_element_located((By.TAG_NAME, "body")))
 
@@ -203,27 +194,11 @@ def main():
         print("   [Step 1] エンジンルーム")
         click_strict(driver, "div[data-name='engine']") 
         
-        # 定義書及びdaily_check.html準拠
-        try:
-            select_radio_strict(driver, "coolantGauge", "2")       # 冷却水量: OK(未補充)
-            select_radio_strict(driver, "engineOilGauge", "1")     # エンジンオイル量
-            select_radio_strict(driver, "brakeFluidGauge", "1")    # ブレーキ液量
-            select_radio_strict(driver, "washerFluidGauge", "2")   # ウォッシャー液量: OK(未補充)
-        except:
-             # 元コードにあったフォールバック(ID直接指定)を一応残すか検討したが、
-             # 厳格な指示のため、HTMLにあるname属性で一本化してStrictに実行する。
-             # 万が一ラジオボタンが見つからない場合はselect_radio_strict内でエラーとなる。
-             # ここではengineOilAmount等、旧コードのname属性違いを修正して実行。
-             pass
-             # ※注意: select_radio_strict内で既にraise Exceptionしているので、ここのtry-exceptは構造上不要だが
-             # 念のため削除してStrict実行フローにする
-        
-        # 再実行（try削除）
-        select_radio_strict(driver, "coolantGauge", "2")
-        select_radio_strict(driver, "engineOilGauge", "1")
-        select_radio_strict(driver, "brakeFluidGauge", "1")
-        select_radio_strict(driver, "washerFluidGauge", "2")
-
+        # [cite_start]定義書[cite: 35-52]及びdaily_check.html準拠
+        select_radio_strict(driver, "coolantGauge", "2")       # 冷却水量: OK(未補充)
+        select_radio_strict(driver, "engineOilGauge", "1")     # エンジンオイル量
+        select_radio_strict(driver, "brakeFluidGauge", "1")    # ブレーキ液量
+        select_radio_strict(driver, "washerFluidGauge", "2")   # ウォッシャー液量: OK(未補充)
 
         # 2. タイヤ (Tab: tire)
         print("   [Step 2] タイヤ")
@@ -305,7 +280,7 @@ def main():
         select_radio_strict(driver, "carStickerExist", "1")
 
         # 8. 車載品 - トランク (Tab: trunk)
-        # ★ここが重要修正: HTML属性 data-name='trunk' を指定して確実に遷移
+        # HTML属性 data-name='trunk' を指定して遷移
         print("   [Step 8] 車載品 - トランク")
         click_strict(driver, "div[data-name='trunk']")
 
