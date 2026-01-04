@@ -115,7 +115,7 @@ def wait_for_index(driver):
 # メイン処理
 # ==========================================
 def main():
-    print("=== Automation Start (Final Verified Version) ===")
+    print("=== Automation Start (Final Verified Version / Skipped Start Button) ===")
 
     if len(sys.argv) < 2:
         print("Error: No payload provided.")
@@ -143,7 +143,6 @@ def main():
 
     try:
         # --- [1] ログイン ---
-        # ★ここからStep 2終了までは元のコード(source 5-18)を完全維持
         print("\n--- [1] ログイン開始 ---")
         driver.get(target_url)
         
@@ -176,17 +175,20 @@ def main():
         )
         click_strict(driver, "#posupMessageConfirmOk")
 
-        # --- [2.5] トップ画面 (点検開始処理) ---
-        print("\n--- [2.5] トップ画面 (点検開始) ---")
-        click_strict(driver, "#startBtnContainer a")
+        # --- [2.5] トップ画面 (点検開始処理 - スキップ版) ---
+        print("\n--- [2.5] トップ画面 (日常点検へ遷移) ---")
         
-        print("   トップ画面: 『日常点検』ボタン有効化待機...")
-        WebDriverWait(driver, 15).until(
-            EC.element_to_be_clickable((By.CSS_SELECTOR, "#dailyBtnContainer a"))
+        # 以前の処理: 点検開始ボタン(#startBtnContainer a)を押す -> 削除
+        # 変更後の処理: すでに開始済み前提のため、直接「日常点検」ボタンを押す
+        
+        print("   トップ画面: 『日常点検』ボタンをクリック...")
+        # 念のため要素が表示されるのを軽く待つ
+        WebDriverWait(driver, 10).until(
+             EC.visibility_of_element_located((By.CSS_SELECTOR, "#dailyBtnContainer a"))
         )
-        time.sleep(1) 
         click_strict(driver, "#dailyBtnContainer a")
         
+
         # --- [3] 日常点検入力 (data-name使用) ---
         print("\n--- [3] 入力実行: 日常点検 ---")
         WebDriverWait(driver, 10).until(EC.presence_of_element_located((By.TAG_NAME, "body")))
