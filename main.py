@@ -1,252 +1,134 @@
-import os
 import sys
-import json
+import os
 import time
+import datetime
+import json
 from selenium import webdriver
-from selenium.webdriver.common.by import By
 from selenium.webdriver.chrome.options import Options
+from selenium.webdriver.chrome.service import Service
+from selenium.webdriver.common.by import By
 from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
-from selenium.common.exceptions import TimeoutException, NoSuchElementException
+from webdriver_manager.chrome import ChromeDriverManager
 
-# ------------------------------------------------------------------
-# 設定・定数
-# ------------------------------------------------------------------
-LOGIN_ID = "0030-927583"
+# ==========================================
+# 設定エリア
+# ==========================================
+# ログインIDはハイフンで分割して入力する仕様
+LOGIN_ID_FULL = "0030-927583" 
 LOGIN_PW = "Ccj-222223"
 EVIDENCE_DIR = "evidence"
 
-# ------------------------------------------------------------------
-# ヘルパー関数
-# ------------------------------------------------------------------
-def setup_driver():
+# ==========================================
+# 厳格な操作関数群 (Fail Fast)
+# ==========================================
+def get_chrome_driver():
     options = Options()
     options.add_argument('--headless')
     options.add_argument('--no-sandbox')
     options.add_argument('--disable-dev-shm-usage')
-    options.add_argument('--window-size=1280,1080')
+    options.add_argument('--window-size=1920,1080')
+    options.add_argument('--disable-gpu')
     options.add_argument('--user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/114.0.0.0 Safari/537.36')
-    driver = webdriver.Chrome(options=options)
-    return driver
+    
+    service = Service(ChromeDriverManager().install())
+    return webdriver.Chrome(service=service, options=options)
 
-def save_screenshot(driver, filename):
+def take_screenshot(driver, name):
     if not os.path.exists(EVIDENCE_DIR):
         os.makedirs(EVIDENCE_DIR)
-    path = os.path.join(EVIDENCE_DIR, filename)
-    driver.save_screenshot(path)
-    print(f"Screenshot saved: {path}")
-
-def click_element(driver, xpath, desc="Element"):
+    timestamp = datetime.datetime.now().strftime('%H%M%S')
+    filename = f"{EVIDENCE_DIR}/{name}_{timestamp}.png"
     try:
-        wait = WebDriverWait(driver, 10)
-        elem = wait.until(EC.element_to_be_clickable((By.XPATH, xpath)))
-        elem.click()
-        print(f"Clicked: {desc}")
-        time.sleep(1.0)
+        driver.save_screenshot(filename)
+        print(f"   [写] 保存: {filename}")
+    except:
+        print("   [写] 撮影失敗")
+
+def click_strict(driver, selector_or_xpath):
+    """クリックできなければ即例外発生（テスト失敗）"""
+    if selector_or_xpath.startswith("/") or selector_or_xpath.startswith("("):
+        by_method = By.XPATH
+        sel = selector_or_xpath
+    else:
+        by_method = By.CSS_SELECTOR
+        sel = selector_or_xpath if (selector_or_xpath.startswith("#") or "." in selector_or_xpath) else f"#{selector_or_xpath}"
+
+    try:
+        # 隠れ要素を避けるため、clickableになるまで待つ
+        el = WebDriverWait(driver, 10).until(EC.element_to_be_clickable((by_method, sel)))
+        # 念のためスクロールして中央に持ってくる
+        driver.execute_script("arguments[0].scrollIntoView({block: 'center'});", el)
+        time.sleep(0.5)
+        el.click()
+        print(f"   [OK] Click: {sel}")
     except Exception as e:
-        print(f"Error clicking {desc}: {e}")
-        raise
+        take_screenshot(driver, "ERROR_ClickFailed")
+        raise Exception(f"クリック不可: {sel}") from e
 
-def input_text(driver, name_attr, value):
-    """
-    指定されたname属性のinputタグに入力する。
-    ★修正: 要素が表示されるまで待機する処理を復元
-    """
-    if not value: return
+def input_strict(driver, selector_or_id, value):
+    """入力できなければ即例外発生"""
+    if selector_or_id.startswith("/") or selector_or_id.startswith("("):
+        by_method = By.XPATH
+        sel = selector_or_id
+    else:
+        by_method = By.CSS_SELECTOR
+        sel = selector_or_id if (selector_or_id.startswith("#") or "." in selector_or_id) else f"#{selector_or_id}"
+    
     try:
-        wait = WebDriverWait(driver, 10)
-        # 要素が存在し、可視化されるまで待つ
-        elem = wait.until(EC.visibility_of_element_located((By.NAME, name_attr)))
-        elem.clear()
-        elem.send_keys(str(value))
-        print(f"Input {name_attr}: {value}")
+        el = WebDriverWait(driver, 10).until(EC.visibility_of_element_located((by_method, sel)))
+        el.clear()
+        el.send_keys(str(value))
+        print(f"   [OK] Input: {value} -> {sel}")
     except Exception as e:
-        print(f"Error inputting {name_attr}: {e}")
-        # 入力必須項目でなければスキップもあり得るが、ログインID等は致命的
-        # ここではエラーログを出して続行を試みる（後続の処理で落ちるか確認）
+        take_screenshot(driver, "ERROR_InputFailed")
+        raise Exception(f"入力失敗: {sel}") from e
 
-def select_radio(driver, name_attr, value):
+def select_radio_strict(driver, name_attr, value):
+    """ラジオボタン選択（name属性とvalue値で特定）"""
+    xpath = f"//input[@name='{name_attr}' and @value='{value}']"
     try:
-        xpath = f"//input[@name='{name_attr}' and @value='{value}']"
-        # ラジオボタンはクリック可能になるまで待つ
-        wait = WebDriverWait(driver, 5)
-        elem = wait.until(EC.element_to_be_clickable((By.XPATH, xpath)))
-        driver.execute_script("arguments[0].click();", elem)
-        print(f"Selected {name_attr}={value}")
-    except Exception:
-        print(f"Radio {name_attr}={value} not found or not clickable, skipping.")
+        # ラジオボタンそのものか、親要素をクリック
+        el = WebDriverWait(driver, 10).until(EC.presence_of_element_located((By.XPATH, xpath)))
+        driver.execute_script("arguments[0].click();", el)
+        print(f"   [OK] Radio: {name_attr}={value}")
+    except Exception as e:
+        take_screenshot(driver, f"ERROR_Radio_{name_attr}")
+        raise Exception(f"ラジオボタン選択失敗: {name_attr}={value}") from e
 
 def switch_tab(driver, tab_text):
+    """タブ切り替え"""
+    xpath = f"//a[contains(text(), '{tab_text}')] | //li[contains(text(), '{tab_text}')] | //div[contains(@class,'tab') and contains(text(), '{tab_text}')]"
     try:
-        xpath = f"//a[contains(text(), '{tab_text}')] | //li[contains(text(), '{tab_text}')]"
-        click_element(driver, xpath, f"Tab: {tab_text}")
-    except Exception:
-        print(f"Tab '{tab_text}' not found.")
+        click_strict(driver, xpath)
+        time.sleep(1.0)
+    except Exception as e:
+        print(f"   [WARNING] Tab '{tab_text}' click failed, trying specific logic.")
 
 def wait_for_index(driver):
-    print("Waiting for Index page...")
+    """一覧画面に戻るのを待機"""
+    print("   一覧画面への遷移を待機中...")
     try:
-        WebDriverWait(driver, 20).until(
-            EC.url_contains("search")
-        )
-        print("Returned to Index.")
+        WebDriverWait(driver, 20).until(EC.url_contains("search"))
         time.sleep(2)
-    except TimeoutException:
-        print("Warning: Timed out waiting for Index page.")
-
-# ------------------------------------------------------------------
-# 各フェーズの実装
-# ------------------------------------------------------------------
-
-def phase1_routine_inspection(driver, tire_data):
-    print("\n--- Phase 1: Routine Inspection ---")
-    
-    # 1. エンジンルーム (Default Tab)
-    # 定義書には項目IDが無いが、標準的なIDとして以下を処理
-    select_radio(driver, "engineOilAmount", "1")
-    select_radio(driver, "brakeLiquid", "1")
-    select_radio(driver, "radiatorWater", "1")
-    select_radio(driver, "batteryLiquid", "1")
-    # ウォッシャー液 -> 2 (OK補充)
-    select_radio(driver, "windowWasherLiquid", "2")
-
-    # 2. タイヤ
-    switch_tab(driver, "タイヤ")
-    select_radio(driver, "tireType", "1")
-    select_radio(driver, "tireDamage", "1")
-
-    # 4輪データ入力
-    # RF
-    input_text(driver, "tireMfrFrontRightCm", tire_data['rf']['week'])
-    input_text(driver, "tireGrooveFrontRightCmIp", str(tire_data['rf']['depth']).split('.')[0])
-    if '.' in str(tire_data['rf']['depth']):
-        input_text(driver, "tireGrooveFrontRightCmFp", str(tire_data['rf']['depth']).split('.')[1])
-    input_text(driver, "tirePressureFrontRightCm", tire_data['rf']['press'])
-    input_text(driver, "tirePressureAdjustedFrontRightCm", tire_data['rf']['press'])
-
-    # LF
-    input_text(driver, "tireMfrFrontLeftCm", tire_data['lf']['week'])
-    input_text(driver, "tireGrooveFrontLeftCmIp", str(tire_data['lf']['depth']).split('.')[0])
-    if '.' in str(tire_data['lf']['depth']):
-        input_text(driver, "tireGrooveFrontLeftCmFp", str(tire_data['lf']['depth']).split('.')[1])
-    input_text(driver, "tirePressureFrontLeftCm", tire_data['lf']['press'])
-    input_text(driver, "tirePressureAdjustedFrontLeftCm", tire_data['lf']['press'])
-
-    # LR
-    input_text(driver, "tireMfrRearLeftBi4", tire_data['lr']['week'])
-    input_text(driver, "tireGrooveRearLeftBi4Ip", str(tire_data['lr']['depth']).split('.')[0])
-    if '.' in str(tire_data['lr']['depth']):
-        input_text(driver, "tireGrooveRearLeftBi4Fp", str(tire_data['lr']['depth']).split('.')[1])
-    input_text(driver, "tirePressureRearLeftBi4", tire_data['lr']['press'])
-    input_text(driver, "tirePressureAdjustedRearLeftBi4", tire_data['lr']['press'])
-
-    # RR
-    input_text(driver, "tireMfrRearRightBi4", tire_data['rr']['week'])
-    input_text(driver, "tireGrooveRearRightBi4Ip", str(tire_data['rr']['depth']).split('.')[0])
-    if '.' in str(tire_data['rr']['depth']):
-        input_text(driver, "tireGrooveRearRightBi4Fp", str(tire_data['rr']['depth']).split('.')[1])
-    input_text(driver, "tirePressureRearRightBi4", tire_data['rr']['press'])
-    input_text(driver, "tirePressureAdjustedRearRightBi4", tire_data['rr']['press'])
-
-    # 3. 動作確認
-    switch_tab(driver, "動作確認")
-    select_radio(driver, "engineCondition", "1")
-    select_radio(driver, "brakeCondition", "1")
-    select_radio(driver, "parkingBrakeCondition", "1")
-    select_radio(driver, "washerSprayCondition", "1")
-    select_radio(driver, "wiperWipeCondition", "1")
-
-    # 4. 車載品 - 運転席
-    switch_tab(driver, "車載品")
-    select_radio(driver, "inspectionCertificateExist", "1")
-    select_radio(driver, "inspectionStickerExist", "1")
-    select_radio(driver, "autoLiabilityExist", "1")
-    select_radio(driver, "maintenanceStickerExist", "1")
-    select_radio(driver, "roomStickerExist", "1")
-    select_radio(driver, "deodorantsExist", "1")
-
-    # 5. 装備確認
-    switch_tab(driver, "装備確認")
-    select_radio(driver, "backMonitor", "1")
-    select_radio(driver, "cornerSensor", "1")
-    select_radio(driver, "brakeSupport", "1")
-    select_radio(driver, "laneDevianceAlert", "1")
-    select_radio(driver, "driveRecorder", "1")
-
-    # 6. 灯火装置 & 車両周り
-    switch_tab(driver, "灯火装置")
-    select_radio(driver, "turnSignal", "1")
-    switch_tab(driver, "車両周り")
-    select_radio(driver, "fuelCap", "1")
-    select_radio(driver, "carStickerExist", "1")
-
-    # 7. 車載品 - トランク
-    try:
-        # 名前が重複しているため、インデックスまたは構造で特定が必要な場合があるが
-        # 一旦 switch_tab でトライ。失敗時はXPath調整が必要。
-        switch_tab(driver, "車載品") 
+        print("   -> 一覧画面に戻りました")
     except:
-        pass
-    
-    select_radio(driver, "warningTrianglePlateDamage", "1")
-    select_radio(driver, "puncRepairKitExist", "1")
-    select_radio(driver, "cleaningKit", "1")
+        take_screenshot(driver, "ERROR_ReturnIndex")
+        raise Exception("一覧画面に戻れませんでした")
 
-    # 完了
-    click_element(driver, "//input[@value='一時保存'] | //button[contains(text(), '一時保存')]", "Temporary Save Button")
-    wait_for_index(driver)
-
-
-def phase2_interior_cleaning(driver, plate):
-    print("\n--- Phase 2: Interior Cleaning ---")
-    row_xpath = f"//td[contains(text(), '{plate}')]/.." 
-    btn_xpath = f"{row_xpath}//a[contains(@href, 'InteriorCleaning') or contains(text(), '車内清掃')]"
-    click_element(driver, btn_xpath, "Interior Cleaning Link")
-
-    select_radio(driver, "interiorDirt", "1")
-    select_radio(driver, "interiorCheckTrouble", "1")
-    select_radio(driver, "soundVolume", "1")
-    select_radio(driver, "lostArticle", "1")
-
-    click_element(driver, "//input[@value='完了'] | //button[contains(text(), '完了')]", "Done Button")
-    wait_for_index(driver)
-
-
-def phase3_car_wash(driver, plate):
-    print("\n--- Phase 3: Car Wash ---")
-    row_xpath = f"//td[contains(text(), '{plate}')]/.."
-    btn_xpath = f"{row_xpath}//a[contains(@href, 'CarWash') or contains(text(), '洗車')]"
-    click_element(driver, btn_xpath, "Car Wash Link")
-
-    # ★指示対応: 洗車不要(2)
-    select_radio(driver, "exteriorDirt", "2")
-
-    click_element(driver, "//input[@value='完了'] | //button[contains(text(), '完了')]", "Done Button")
-    wait_for_index(driver)
-
-
-def phase4_exterior_check(driver, plate):
-    print("\n--- Phase 4: Exterior Check ---")
-    row_xpath = f"//td[contains(text(), '{plate}')]/.."
-    btn_xpath = f"{row_xpath}//a[contains(@href, 'ExteriorCheck') or contains(text(), '外装')]"
-    click_element(driver, btn_xpath, "Exterior Check Link")
-
-    select_radio(driver, "exteriorState", "1")
-
-    click_element(driver, "//input[@value='完了'] | //button[contains(text(), '完了')]", "Done Button")
-    wait_for_index(driver)
-
-
-# ------------------------------------------------------------------
+# ==========================================
 # メイン処理
-# ------------------------------------------------------------------
+# ==========================================
 def main():
+    print("=== Automation Start (Integrated Version) ===")
+
+    # 1. 引数取得 (JSONペイロード)
     if len(sys.argv) < 2:
         print("Error: No payload provided.")
         sys.exit(1)
-        
+    
     try:
-        # YAMLの変更(toJson)に対応
+        # YAML修正後のJSON形式で受け取る
         payload_str = sys.argv[1]
         data = json.loads(payload_str)
         
@@ -256,60 +138,196 @@ def main():
         
         print(f"Target Plate: {target_plate}")
         print(f"URL: {target_url}")
-
+        
         if not target_plate or not tire_data:
-            print("Error: Missing plate or tire_data.")
-            sys.exit(1)
+            raise Exception("Plate or Tire Data missing")
 
     except Exception as e:
         print(f"Error parsing payload: {e}")
         sys.exit(1)
 
-    driver = setup_driver()
+    driver = get_chrome_driver()
 
     try:
-        # 1. ログイン
+        # --- [1] ログイン (成功実績のあるロジック) ---
+        print("\n--- [1] ログイン開始 ---")
         driver.get(target_url)
-        print("Opened Login Page.")
         
-        # ★修正: input_text内の待機処理で、ページロード待ちに対応
-        # name="userId" は維持
-        input_text(driver, "userId", LOGIN_ID)
-        input_text(driver, "password", LOGIN_PW)
-        click_element(driver, "//input[@type='submit' or @type='button']", "Login Button")
+        # ★ここが重要：IDを分割して入力する
+        id_parts = LOGIN_ID_FULL.split("-")
+        input_strict(driver, "#cardNo1", id_parts[0])
+        input_strict(driver, "#cardNo2", id_parts[1])
+        input_strict(driver, "#password", LOGIN_PW)
         
-        # 2. 車両検索（インデックス画面）
+        # ログインボタン
+        click_strict(driver, ".btn-primary, input[type='submit']")
+        
+        # --- [1.5] メニュー画面 ---
+        # ログイン後、メニュー画面が出ることがあるので、あれば「点検」または「検索」へ
+        # URLでsearchが含まれていれば既に一覧
+        time.sleep(2)
+        if "search" not in driver.current_url:
+             print("\n--- [1.5] メニュー回避 / 一覧へ遷移 ---")
+             # 成功ファイルにあったロジックを使用
+             try:
+                 click_strict(driver, "//main//a[contains(@href,'reserve')] | //main//button[contains(text(),'予約履歴')]")
+             except:
+                 pass # 既に一覧にいる可能性
+
+        # --- [2] 車両特定 & 日常点検開始 ---
+        print("\n--- [2] 日常点検フェーズ ---")
         wait_for_index(driver)
         
-        # --- Phase 1 ---
+        # 対象車両の行にある「日常点検」ボタンを押す
+        # XPath: プレート番号を含むセルの行(tr)の中にあるリンク
         row_xpath = f"//td[contains(text(), '{target_plate}')]/.."
         routine_btn_xpath = f"{row_xpath}//a[contains(@href, 'RoutineInspection') or contains(text(), '日常点検')]"
-        click_element(driver, routine_btn_xpath, "Routine Inspection Link")
         
-        phase1_routine_inspection(driver, tire_data)
+        click_strict(driver, routine_btn_xpath)
         
-        # --- Phase 2 ---
-        phase2_interior_cleaning(driver, target_plate)
+        # --- [3] 日常点検入力 (仕様定義書準拠) ---
+        print("\n--- [3] 入力実行: 日常点検 ---")
         
-        # --- Phase 3 ---
-        phase3_car_wash(driver, target_plate)
+        # 1. エンジンルーム (Default)
+        select_radio_strict(driver, "engineOilAmount", "1")
+        select_radio_strict(driver, "brakeLiquid", "1")
+        select_radio_strict(driver, "radiatorWater", "1")
+        select_radio_strict(driver, "batteryLiquid", "1")
+        select_radio_strict(driver, "windowWasherLiquid", "2") # ★OK補充
         
-        # --- Phase 4 ---
-        phase4_exterior_check(driver, target_plate)
+        # 2. タイヤ
+        switch_tab(driver, "タイヤ")
+        select_radio_strict(driver, "tireType", "1")
+        select_radio_strict(driver, "tireDamage", "1")
         
-        print("\nAll Phases Completed Successfully.")
-        # 正常終了
+        # タイヤデータ入力 (RF->LF->LR->RR)
+        # RF
+        input_strict(driver, "input[name='tireMfrFrontRightCm']", tire_data['rf']['week'])
+        input_strict(driver, "input[name='tireGrooveFrontRightCmIp']", str(tire_data['rf']['depth']).split('.')[0])
+        if '.' in str(tire_data['rf']['depth']):
+            input_strict(driver, "input[name='tireGrooveFrontRightCmFp']", str(tire_data['rf']['depth']).split('.')[1])
+        input_strict(driver, "input[name='tirePressureFrontRightCm']", tire_data['rf']['press'])
+        input_strict(driver, "input[name='tirePressureAdjustedFrontRightCm']", tire_data['rf']['press'])
+
+        # LF
+        input_strict(driver, "input[name='tireMfrFrontLeftCm']", tire_data['lf']['week'])
+        input_strict(driver, "input[name='tireGrooveFrontLeftCmIp']", str(tire_data['lf']['depth']).split('.')[0])
+        if '.' in str(tire_data['lf']['depth']):
+            input_strict(driver, "input[name='tireGrooveFrontLeftCmFp']", str(tire_data['lf']['depth']).split('.')[1])
+        input_strict(driver, "input[name='tirePressureFrontLeftCm']", tire_data['lf']['press'])
+        input_strict(driver, "input[name='tirePressureAdjustedFrontLeftCm']", tire_data['lf']['press'])
+
+        # LR
+        input_strict(driver, "input[name='tireMfrRearLeftBi4']", tire_data['lr']['week'])
+        input_strict(driver, "input[name='tireGrooveRearLeftBi4Ip']", str(tire_data['lr']['depth']).split('.')[0])
+        if '.' in str(tire_data['lr']['depth']):
+            input_strict(driver, "input[name='tireGrooveRearLeftBi4Fp']", str(tire_data['lr']['depth']).split('.')[1])
+        input_strict(driver, "input[name='tirePressureRearLeftBi4']", tire_data['lr']['press'])
+        input_strict(driver, "input[name='tirePressureAdjustedRearLeftBi4']", tire_data['lr']['press'])
+
+        # RR
+        input_strict(driver, "input[name='tireMfrRearRightBi4']", tire_data['rr']['week'])
+        input_strict(driver, "input[name='tireGrooveRearRightBi4Ip']", str(tire_data['rr']['depth']).split('.')[0])
+        if '.' in str(tire_data['rr']['depth']):
+            input_strict(driver, "input[name='tireGrooveRearRightBi4Fp']", str(tire_data['rr']['depth']).split('.')[1])
+        input_strict(driver, "input[name='tirePressureRearRightBi4']", tire_data['rr']['press'])
+        input_strict(driver, "input[name='tirePressureAdjustedRearRightBi4']", tire_data['rr']['press'])
+
+        # 3. 動作確認
+        switch_tab(driver, "動作確認")
+        select_radio_strict(driver, "engineCondition", "1")
+        select_radio_strict(driver, "brakeCondition", "1")
+        select_radio_strict(driver, "parkingBrakeCondition", "1")
+        select_radio_strict(driver, "washerSprayCondition", "1")
+        select_radio_strict(driver, "wiperWipeCondition", "1")
+
+        # 4. 車載品 (運転席)
+        switch_tab(driver, "車載品")
+        select_radio_strict(driver, "inspectionCertificateExist", "1")
+        select_radio_strict(driver, "inspectionStickerExist", "1")
+        select_radio_strict(driver, "autoLiabilityExist", "1")
+        select_radio_strict(driver, "maintenanceStickerExist", "1")
+        select_radio_strict(driver, "roomStickerExist", "1")
+        select_radio_strict(driver, "deodorantsExist", "1")
+
+        # 5. 装備確認
+        switch_tab(driver, "装備確認")
+        select_radio_strict(driver, "backMonitor", "1")
+        select_radio_strict(driver, "cornerSensor", "1")
+        select_radio_strict(driver, "brakeSupport", "1")
+        select_radio_strict(driver, "laneDevianceAlert", "1")
+        select_radio_strict(driver, "driveRecorder", "1")
+
+        # 6. 灯火/車両周り
+        switch_tab(driver, "灯火装置")
+        select_radio_strict(driver, "turnSignal", "1")
+        switch_tab(driver, "車両周り")
+        select_radio_strict(driver, "fuelCap", "1")
+        select_radio_strict(driver, "carStickerExist", "1")
+
+        # 7. トランク (再度 車載品タブ)
+        try:
+             click_strict(driver, "(//a[contains(text(), '車載品')])[2] | //a[contains(text(), '車載品')]")
+        except:
+             pass
+        select_radio_strict(driver, "warningTrianglePlateDamage", "1")
+        select_radio_strict(driver, "puncRepairKitExist", "1")
+        select_radio_strict(driver, "cleaningKit", "1")
+
+        # 一時保存
+        print("   一時保存をクリック...")
+        click_strict(driver, "//input[@value='一時保存'] | //button[contains(text(), '一時保存')]")
+        wait_for_index(driver)
+
+
+        # --- [4] 車内清掃フェーズ ---
+        print("\n--- [4] 車内清掃フェーズ ---")
+        row_xpath = f"//td[contains(text(), '{target_plate}')]/.."
+        btn_xpath = f"{row_xpath}//a[contains(@href, 'InteriorCleaning') or contains(text(), '車内清掃')]"
+        click_strict(driver, btn_xpath)
+
+        select_radio_strict(driver, "interiorDirt", "1")
+        select_radio_strict(driver, "interiorCheckTrouble", "1")
+        select_radio_strict(driver, "soundVolume", "1")
+        select_radio_strict(driver, "lostArticle", "1")
+
+        click_strict(driver, "//input[@value='完了'] | //button[contains(text(), '完了')]")
+        wait_for_index(driver)
+
+
+        # --- [5] 洗車フェーズ ---
+        print("\n--- [5] 洗車フェーズ ---")
+        row_xpath = f"//td[contains(text(), '{target_plate}')]/.."
+        btn_xpath = f"{row_xpath}//a[contains(@href, 'CarWash') or contains(text(), '洗車')]"
+        click_strict(driver, btn_xpath)
+
+        # ★洗車不要(2)
+        select_radio_strict(driver, "exteriorDirt", "2")
+
+        click_strict(driver, "//input[@value='完了'] | //button[contains(text(), '完了')]")
+        wait_for_index(driver)
+
+
+        # --- [6] 外装確認フェーズ ---
+        print("\n--- [6] 外装確認フェーズ ---")
+        row_xpath = f"//td[contains(text(), '{target_plate}')]/.."
+        btn_xpath = f"{row_xpath}//a[contains(@href, 'ExteriorCheck') or contains(text(), '外装')]"
+        click_strict(driver, btn_xpath)
+
+        select_radio_strict(driver, "exteriorState", "1")
+
+        click_strict(driver, "//input[@value='完了'] | //button[contains(text(), '完了')]")
+        wait_for_index(driver)
+
+        print("\n=== SUCCESS: 全工程完了 ===")
         sys.exit(0)
 
     except Exception as e:
-        print(f"\nExecution Failed: {e}")
-        save_screenshot(driver, "error_screenshot.png")
-        # 異常終了（GitHub Actionsを赤にする）
+        print(f"\n[!!!] CRITICAL ERROR (Test Failed) [!!!]\n{e}")
+        take_screenshot(driver, "FATAL_ERROR")
         sys.exit(1)
-        
     finally:
         driver.quit()
-        print("Driver Closed.")
 
 if __name__ == "__main__":
     main()
