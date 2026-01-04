@@ -55,8 +55,6 @@ def select_radio(driver, name_attr, value):
     try:
         xpath = f"//input[@name='{name_attr}' and @value='{value}']"
         elem = driver.find_element(By.XPATH, xpath)
-        # ラジオボタン自体が見えない場合、親のlabelをクリックする等の対応が必要な場合があるが
-        # 基本的にはJS実行または直接クリックで試行
         driver.execute_script("arguments[0].click();", elem)
         print(f"Selected {name_attr}={value}")
     except NoSuchElementException:
@@ -261,13 +259,14 @@ def main():
         sys.exit(1)
         
     try:
+        # ★修正箇所: YAMLでJSON化して渡されているので、そのまま辞書として読み込む
         payload_str = sys.argv[1]
-        payload = json.loads(payload_str)
-        client_payload = payload.get('client_payload', {})
+        data = json.loads(payload_str)
         
-        target_plate = client_payload.get('plate')
-        target_url = client_payload.get('target_url')
-        tire_data = client_payload.get('tire_data', {})
+        # 以前のような client_payload キーの探索をやめ、直接データを取り出す
+        target_plate = data.get('plate')
+        target_url = data.get('target_url')
+        tire_data = data.get('tire_data', {})
         
         print(f"Target Plate: {target_plate}")
         print(f"URL: {target_url}")
