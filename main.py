@@ -42,38 +42,45 @@ def click_element(driver, xpath, desc="Element"):
         elem = wait.until(EC.element_to_be_clickable((By.XPATH, xpath)))
         elem.click()
         print(f"Clicked: {desc}")
-        time.sleep(1.5)
+        time.sleep(1.0)
     except Exception as e:
         print(f"Error clicking {desc}: {e}")
         raise
 
 def input_text(driver, name_attr, value):
+    """
+    指定されたname属性のinputタグに入力する。
+    ★修正: 要素が表示されるまで待機する処理を復元
+    """
     if not value: return
     try:
-        elem = driver.find_element(By.NAME, name_attr)
+        wait = WebDriverWait(driver, 10)
+        # 要素が存在し、可視化されるまで待つ
+        elem = wait.until(EC.visibility_of_element_located((By.NAME, name_attr)))
         elem.clear()
         elem.send_keys(str(value))
         print(f"Input {name_attr}: {value}")
-    except NoSuchElementException:
-        print(f"Skipped {name_attr} (Not found)")
+    except Exception as e:
+        print(f"Error inputting {name_attr}: {e}")
+        # 入力必須項目でなければスキップもあり得るが、ログインID等は致命的
+        # ここではエラーログを出して続行を試みる（後続の処理で落ちるか確認）
 
 def select_radio(driver, name_attr, value):
     try:
         xpath = f"//input[@name='{name_attr}' and @value='{value}']"
-        elem = driver.find_element(By.XPATH, xpath)
+        # ラジオボタンはクリック可能になるまで待つ
+        wait = WebDriverWait(driver, 5)
+        elem = wait.until(EC.element_to_be_clickable((By.XPATH, xpath)))
         driver.execute_script("arguments[0].click();", elem)
         print(f"Selected {name_attr}={value}")
-    except NoSuchElementException:
-        print(f"Radio {name_attr}={value} not found, skipping.")
+    except Exception:
+        print(f"Radio {name_attr}={value} not found or not clickable, skipping.")
 
 def switch_tab(driver, tab_text):
     try:
         xpath = f"//a[contains(text(), '{tab_text}')] | //li[contains(text(), '{tab_text}')]"
-        elem = driver.find_element(By.XPATH, xpath)
-        elem.click()
-        print(f"Switched Tab: {tab_text}")
-        time.sleep(1.5)
-    except NoSuchElementException:
+        click_element(driver, xpath, f"Tab: {tab_text}")
+    except Exception:
         print(f"Tab '{tab_text}' not found.")
 
 def wait_for_index(driver):
@@ -94,12 +101,14 @@ def wait_for_index(driver):
 def phase1_routine_inspection(driver, tire_data):
     print("\n--- Phase 1: Routine Inspection ---")
     
-    # 1. エンジンルーム
+    # 1. エンジンルーム (Default Tab)
+    # 定義書には項目IDが無いが、標準的なIDとして以下を処理
     select_radio(driver, "engineOilAmount", "1")
     select_radio(driver, "brakeLiquid", "1")
     select_radio(driver, "radiatorWater", "1")
     select_radio(driver, "batteryLiquid", "1")
-    select_radio(driver, "windowWasherLiquid", "2") # OK補充
+    # ウォッシャー液 -> 2 (OK補充)
+    select_radio(driver, "windowWasherLiquid", "2")
 
     # 2. タイヤ
     switch_tab(driver, "タイヤ")
@@ -173,6 +182,8 @@ def phase1_routine_inspection(driver, tire_data):
 
     # 7. 車載品 - トランク
     try:
+        # 名前が重複しているため、インデックスまたは構造で特定が必要な場合があるが
+        # 一旦 switch_tab でトライ。失敗時はXPath調整が必要。
         switch_tab(driver, "車載品") 
     except:
         pass
@@ -207,7 +218,8 @@ def phase3_car_wash(driver, plate):
     btn_xpath = f"{row_xpath}//a[contains(@href, 'CarWash') or contains(text(), '洗車')]"
     click_element(driver, btn_xpath, "Car Wash Link")
 
-    select_radio(driver, "exteriorDirt", "2") # 洗車不要
+    # ★指示対応: 洗車不要(2)
+    select_radio(driver, "exteriorDirt", "2")
 
     click_element(driver, "//input[@value='完了'] | //button[contains(text(), '完了')]", "Done Button")
     wait_for_index(driver)
@@ -234,8 +246,7 @@ def main():
         sys.exit(1)
         
     try:
-        # ★修正: YAMLでJSON化されているのでそのまま読み込む
-        # 余計な 'client_payload' キーの探索を廃止
+        # YAMLの変更(toJson)に対応
         payload_str = sys.argv[1]
         data = json.loads(payload_str)
         
@@ -261,6 +272,8 @@ def main():
         driver.get(target_url)
         print("Opened Login Page.")
         
+        # ★修正: input_text内の待機処理で、ページロード待ちに対応
+        # name="userId" は維持
         input_text(driver, "userId", LOGIN_ID)
         input_text(driver, "password", LOGIN_PW)
         click_element(driver, "//input[@type='submit' or @type='button']", "Login Button")
@@ -285,16 +298,16 @@ def main():
         phase4_exterior_check(driver, target_plate)
         
         print("\nAll Phases Completed Successfully.")
-        sys.exit(0) # 正常終了
+        # 正常終了
+        sys.exit(0)
 
     except Exception as e:
-        # ★修正: エラー内容を隠さず表示し、証拠写真を撮って異常終了する
         print(f"\nExecution Failed: {e}")
         save_screenshot(driver, "error_screenshot.png")
+        # 異常終了（GitHub Actionsを赤にする）
         sys.exit(1)
         
     finally:
-        # ★修正: ここで sys.exit(0) をしてはいけない。ドライバを閉じるだけ。
         driver.quit()
         print("Driver Closed.")
 
