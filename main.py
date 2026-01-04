@@ -115,7 +115,7 @@ def wait_for_index(driver):
 # メイン処理
 # ==========================================
 def main():
-    print("=== Automation Start (Detail Page Flow) ===")
+    print("=== Automation Start (Final Verified Version) ===")
 
     if len(sys.argv) < 2:
         print("Error: No payload provided.")
@@ -275,43 +275,41 @@ def main():
         select_radio_strict(driver, "puncRepairKitExist", "1")
         select_radio_strict(driver, "cleaningKit", "1")
 
-        # 一時保存
+        # 一時保存 (HTML: <a class="is-stop" ...>)
         print("   一時保存をクリック...")
-        click_strict(driver, ".is-stop")
+        click_strict(driver, "a.is-stop") # class指定で明確化
         wait_for_index(driver)
 
         
-        # --- [4] 車内清掃フェーズ (修正: ID指定でボタンをクリック) ---
+        # --- [4] 車内清掃フェーズ ---
         print("\n--- [4] 車内清掃フェーズ ---")
-        # index.html の #interiorBtnContainer 内のリンクをクリック
-        click_strict(driver, "#interiorBtnContainer a")
+        click_strict(driver, "#interiorBtnContainer a") # ID指定
 
         select_radio_strict(driver, "interiorDirt", "1")
         select_radio_strict(driver, "interiorCheckTrouble", "1")
         select_radio_strict(driver, "soundVolume", "1")
         select_radio_strict(driver, "lostArticle", "1")
 
-        click_strict(driver, "//input[@value='完了'] | //button[contains(text(), '完了')] | .is-complete")
+        # 完了ボタン修正: aタグのis-completeを狙う
+        click_strict(driver, "a.is-complete")
         wait_for_index(driver)
 
-        # --- [5] 洗車フェーズ (修正: ID指定でボタンをクリック) ---
+        # --- [5] 洗車フェーズ ---
         print("\n--- [5] 洗車フェーズ ---")
-        # index.html の #washBtnContainer 内のリンクをクリック
-        click_strict(driver, "#washBtnContainer a")
+        click_strict(driver, "#washBtnContainer a") # ID指定
 
         select_radio_strict(driver, "exteriorDirt", "2") # 洗車不要
 
-        click_strict(driver, "//input[@value='完了'] | //button[contains(text(), '完了')] | .is-complete")
+        click_strict(driver, "a.is-complete")
         wait_for_index(driver)
 
-        # --- [6] 外装確認フェーズ (修正: ID指定でボタンをクリック) ---
+        # --- [6] 外装確認フェーズ ---
         print("\n--- [6] 外装確認フェーズ ---")
-        # index.html の #exteriorBtnContainer 内のリンクをクリック
-        click_strict(driver, "#exteriorBtnContainer a")
+        click_strict(driver, "#exteriorBtnContainer a") # ID指定
 
         select_radio_strict(driver, "exteriorState", "1")
 
-        click_strict(driver, "//input[@value='完了'] | //button[contains(text(), '完了')] | .is-complete")
+        click_strict(driver, "a.is-complete")
         wait_for_index(driver)
 
         print("\n=== SUCCESS: 全工程完了 ===")
