@@ -15,7 +15,7 @@ from webdriver_manager.chrome import ChromeDriverManager
 # ==========================================
 # 設定エリア
 # ==========================================
-# テスト時はダミーHTMLのフルパスまたはURLを指定して起動することを推奨
+# テスト時はダミーHTMLのパスまたはURLを指定して起動することを推奨
 DEFAULT_LOGIN_URL = "https://dailycheck.tc-extsys.jp/tcrappsweb/web/login/tawLogin.html"
 
 # 必要に応じて変更
@@ -34,7 +34,6 @@ def get_chrome_driver():
     堅牢なドライバー取得ロジック
     """
     options = Options()
-    # ヘッドレスモード設定（GitHub Actionsでは必須）
     options.add_argument('--headless') 
     options.add_argument('--no-sandbox')
     options.add_argument('--disable-dev-shm-usage')
@@ -53,7 +52,7 @@ def get_chrome_driver():
         print(f"   [Driver] webdriver_manager 失敗: {e}")
         print("   [Driver] システムインストール済みのドライバーで再試行します...")
 
-    # 2. 失敗した場合、環境パス(PATH)にある chromedriver を使用する (GitHub Actionsのプリインストール版など)
+    # 2. 失敗した場合、環境パス(PATH)にある chromedriver を使用する
     try:
         driver = webdriver.Chrome(options=options)
         print("   [Driver] 成功: System Path Driver")
@@ -105,9 +104,7 @@ def input_strict(driver, selector_or_id, value):
         
         # 入力値確認
         actual = el.get_attribute('value')
-        # 数値などのフォーマット違いを許容するため、文字列として比較
         if str(actual) != str(value):
-            # 前ゼロ落ちなどを考慮して緩く警告のみにする場合もあるが、基本はStrict
             print(f"      (注意) 入力値不一致: 期待({value}) != 実際({actual})")
         
         print(f"   [OK] Input: {value} -> {sel}")
@@ -119,7 +116,6 @@ def input_strict(driver, selector_or_id, value):
 def switch_tab(driver, tab_data_name):
     """
     指定された data-name 属性を持つタブをクリックして表示を切り替える。
-    例: switch_tab(driver, "engine")
     """
     try:
         print(f"   ▼ タブ切り替え: {tab_data_name}")
@@ -127,12 +123,9 @@ def switch_tab(driver, tab_data_name):
         # タブ自体が表示されているか待機
         tab_el = WebDriverWait(driver, 10).until(EC.element_to_be_clickable((By.CSS_SELECTOR, selector)))
         
-        # すでにactiveなら押さない手もあるが、念のため押す
         driver.execute_script("arguments[0].scrollIntoView({block: 'center'});", tab_el)
         tab_el.click()
-        
-        # コンテンツが表示されるまで少し待つ（アニメーション考慮）
-        time.sleep(1.0)
+        time.sleep(1.0) # アニメーション待ち
         
     except Exception as e:
         take_screenshot(driver, f"ERROR_TabSwitch_{tab_data_name}")
@@ -142,15 +135,23 @@ def switch_tab(driver, tab_data_name):
 # メイン処理
 # ==========================================
 def main():
-    print("=== Automation Start (Strict Mode + Tab Control) ===")
+    print("=== Automation Start (Merged Version) ===")
 
-    # 引数でURLが渡されたらそれを使う（ローカルファイルテスト用など）
+    # 引数処理（ここを強化）
     target_url = sys.argv[1] if len(sys.argv) > 1 else DEFAULT_LOGIN_URL
+    
+    # URLが http で始まらない場合、ローカルファイルとみなして絶対パス+file://に変換
+    if not target_url.startswith("http"):
+        # すでに file:// がついていない場合のみ処理
+        if not target_url.startswith("file://"):
+            abs_path = os.path.abspath(target_url)
+            target_url = f"file://{abs_path}"
+    
     print(f"Target URL: {target_url}")
 
+    driver = get_chrome_driver()
+
     try:
-        driver = get_chrome_driver()
-        
         driver.get(target_url)
         time.sleep(2)
 
@@ -167,26 +168,16 @@ def main():
         # --- [3] 日常点検データ取得 & 入力 ---
         print("\n--- [3] 日常点検 & GASデータ取得 ---")
         
-        # GASからデータ取得（車両番号が必要だが、今回はダミー用に固定値または仮定）
+        # GASデータ取得（ダミー用に今回はスキップまたは空で進行）
         tire_data = {}
-        # target_plate = "相模 7725" # ダミーHTML上のナンバー
-        # try:
-        #     res = requests.get(f"{GAS_API_URL}?plate={target_plate}&check=1")
-        #     if res.json().get("ok"): tire_data = res.json()
-        # except:
-        #     print("   (GASデータ取得スキップ)")
 
         # ===== 1. エンジンルーム (Tab: engine) =====
         switch_tab(driver, "engine")
         try:
-            # 冷却水量: coolantGauge1 (OK)
-            click_strict(driver, "coolantGauge1")
-            # エンジンオイル: engineOilGauge1 (OK)
-            click_strict(driver, "engineOilGauge1")
-            # ブレーキ液: brakeFluidGauge1 (OK)
-            click_strict(driver, "brakeFluidGauge1")
-            # ウォッシャー液: washerFluidGauge1 (OK-未補充)
-            click_strict(driver, "washerFluidGauge1")
+            click_strict(driver, "coolantGauge1")     # 冷却水
+            click_strict(driver, "engineOilGauge1")   # オイル
+            click_strict(driver, "brakeFluidGauge1")  # ブレーキ液
+            click_strict(driver, "washerFluidGauge1") # ウォッシャー
         except Exception as e:
             print(f"   [Error] エンジンルーム入力失敗: {e}")
             raise e
@@ -194,40 +185,32 @@ def main():
         # ===== 2. タイヤ (Tab: tire) =====
         switch_tab(driver, "tire")
         try:
-            # タイヤ種別: tireType1 (ノーマル)
-            click_strict(driver, "tireType1")
+            click_strict(driver, "tireType1") # ノーマル
             
-            # 指定空気圧（GASデータ or デフォルト）
             input_strict(driver, "tireFrontRegularPressure", tire_data.get("std_f", "250"))
             input_strict(driver, "tireRearRegularPressure", tire_data.get("std_r", "240"))
             
-            # 4輪ループ処理 (右前 -> 左前 -> 左後 -> 右後)
+            # 4輪ループ処理
             wheels = [
                 ("rf", "FrontRightCm"), 
                 ("lf", "FrontLeftCm"), 
                 ("lr", "RearLeftBi4"), 
                 ("rr", "RearRightBi4")
             ]
-            
-            prev = tire_data.get("prev", {}) # 前回値があれば参照
+            prev = tire_data.get("prev", {})
 
             for pre, suf in wheels:
                 print(f"   -- タイヤ入力: {suf} --")
-                # 製造年週 (例: 1224)
-                week = str(prev.get(f"dot_{pre}", "1224")) # デフォルト値を適当に設定
+                week = str(prev.get(f"dot_{pre}", "1224"))
                 if len(week)==3: week = "0"+week
                 input_strict(driver, f"tireMfr{suf}", week)
                 
-                # 亀裂損傷 (OK=1)
-                # 暫定: 最初の1つだけ押す
+                # 亀裂損傷 (右前のみクリックする仕様に合わせる)
                 if pre == "rf": 
                     click_strict(driver, "tireDamage1")
 
-                # 溝 (Ip=整数, Fp=小数)
                 input_strict(driver, f"tireGroove{suf}Ip", "4")
                 input_strict(driver, f"tireGroove{suf}Fp", "5")
-                
-                # 空気圧 (前=240, 後=空欄など)
                 input_strict(driver, f"tirePressure{suf}", "240")
                 input_strict(driver, f"tirePressureAdjusted{suf}", "240")
 
@@ -238,7 +221,6 @@ def main():
 
         # ===== 3. 動作確認 (Tab: motion) =====
         switch_tab(driver, "motion")
-        # エンジン、ブレーキ、駐車ブレーキ、ウォッシャー、ワイパー (全てOK=1)
         click_strict(driver, "engineCondition1")
         click_strict(driver, "brakeCondition1")
         click_strict(driver, "parkingBrakeCondition1")
@@ -247,27 +229,18 @@ def main():
 
         # ===== 4. 車載品-運転席 (Tab: in-car) =====
         switch_tab(driver, "in-car")
-        # 車検証、シール類、自賠責 (全てOK=1)
         click_strict(driver, "inspectionCertificateExist1")
         click_strict(driver, "inspectionStickerExist1")
         click_strict(driver, "autoLiabilityExist1")
         click_strict(driver, "maintenanceStickerExist1")
-        
-        # 発炎筒
-        click_strict(driver, "flaresExist1") # 発炎式
-        # 有効期限 (年月) - input type="month"
+        click_strict(driver, "flaresExist1")
         input_strict(driver, "flaresLimit", "2029-01")
-        
-        # 駐車パスカード (OK=1)
         click_strict(driver, "passCardExist1")
-        # 室内シール (OK=1 未交換)
         click_strict(driver, "roomStickerExist1")
-        # 消臭剤 (OK=1)
         click_strict(driver, "deodorantsExist1")
 
         # ===== 5. 装備確認 (Tab: equipment) =====
         switch_tab(driver, "equipment")
-        # バックモニター、センサー、ブレーキサポート、車線逸脱、ドラレコ (全てOK=1)
         click_strict(driver, "backMonitor1")
         click_strict(driver, "cornerSensor1")
         click_strict(driver, "brakeSupport1")
@@ -276,33 +249,21 @@ def main():
 
         # ===== 6. 灯火装置 (Tab: light) =====
         switch_tab(driver, "light")
-        # 点灯状態 (OK=1)
         click_strict(driver, "turnSignal1")
 
         # ===== 7. 車両周り (Tab: perimeter) =====
         switch_tab(driver, "perimeter")
-        # 給油口 (OK=1)
         click_strict(driver, "fuelCap1")
-        # 車両シール (OK=1)
         click_strict(driver, "carStickerExist1")
 
         # ===== 8. 車載品-トランク (Tab: trunk) =====
         switch_tab(driver, "trunk")
-        # 三角停止板 (OK=1)
         click_strict(driver, "warningTrianglePlateDamage1")
-        # パンク修理キット (OK=1)
         click_strict(driver, "puncRepairKitExist1")
         input_strict(driver, "puncRepairKitLimit", "2028-10")
-        
-        # スペアタイヤ (対象外=3 などを選ぶロジックが必要だが、ここではOK=1とする)
-        # click_strict(driver, "spearTireDamage3") # 対象外の場合
-        click_strict(driver, "spearTireDamage1") # OKの場合
-        
-        # 工具 (OK=1)
+        click_strict(driver, "spearTireDamage1")
         click_strict(driver, "tireJackupSetExist1")
-        # 清掃キット (OK=1)
         click_strict(driver, "cleaningKit1")
-        # ジュニアシート (車載なし=4)
         click_strict(driver, "juniorSeat2")
 
         take_screenshot(driver, "99_AllInputCompleted")
@@ -310,20 +271,15 @@ def main():
 
         # --- [5] 完了処理 ---
         print("\n--- [5] 完了処理 ---")
-        
         try:
-            # 完了ボタン (クラス名やIDで探す)
-            # ダミーHTMLには .is-complete クラスのボタンがある
+            # 完了ボタン (.is-complete)
             finish_selector = "a.is-complete" 
-            
-            # ボタンが見えるまで待機（フッターにあるのでスクロール不要な場合が多いが念のため）
             finish_btn = WebDriverWait(driver, 5).until(
                 EC.element_to_be_clickable((By.CSS_SELECTOR, finish_selector))
             )
             print("   完了ボタン発見。クリックします...")
             finish_btn.click()
             
-            # アラートが出る場合は承認
             try:
                 WebDriverWait(driver, 3).until(EC.alert_is_present()).accept()
                 print("   完了アラート承認")
@@ -341,8 +297,6 @@ def main():
         take_screenshot(driver, "FATAL_ERROR")
         raise e 
     finally:
-        # 確認のために少し待ってから閉じる
-        time.sleep(5)
         if 'driver' in locals():
             driver.quit()
 
