@@ -15,13 +15,13 @@ from webdriver_manager.chrome import ChromeDriverManager
 # ==========================================
 # 設定エリア
 # ==========================================
-DEFAULT_LOGIN_URL = "https://dailycheck.tc-extsys.jp/tcrappsweb/web/login/tawLogin.html" #
+DEFAULT_LOGIN_URL = "https://dailycheck.tc-extsys.jp/tcrappsweb/web/login/tawLogin.html"
 TMA_ID = "0030-927583"
 TMA_PW = "Ccj-222223"
 EVIDENCE_DIR = "evidence"
 
 # ==========================================
-# 厳格な操作関数群 (Fail Fast) - 成功ファイルより移植
+# 厳格な操作関数群 (Fail Fast)
 # ==========================================
 def get_chrome_driver():
     options = Options()
@@ -46,14 +46,24 @@ def take_screenshot(driver, name):
     except:
         print("   [写] 撮影失敗")
 
-def click_strict(driver, selector_or_xpath):
-    """クリックできなければ即例外発生（テスト失敗）"""
-    if selector_or_xpath.startswith("/") or selector_or_xpath.startswith("("):
-        by_method = By.XPATH
-        sel = selector_or_xpath
-    else:
-        by_method = By.CSS_SELECTOR
-        sel = selector_or_xpath if (selector_or_xpath.startswith("#") or "." in selector_or_xpath) else f"#{selector_or_xpath}"
+def determine_selector(selector_str):
+    """
+    文字列からXPathかCSSセレクタか、単なるIDかを判定して返す
+    ★修正: '[' や '.' を含む場合はそのままCSSセレクタとして扱う
+    """
+    if selector_str.startswith("/") or selector_str.startswith("("):
+        return By.XPATH, selector_str
+    
+    # CSSセレクタとみなす条件: #, ., [, >, : を含む場合
+    if any(char in selector_str for char in ['#', '.', '[', ']', '>', ':']):
+        return By.CSS_SELECTOR, selector_str
+    
+    # それ以外はIDとみなして # を付与
+    return By.CSS_SELECTOR, f"#{selector_str}"
+
+def click_strict(driver, selector_str):
+    """クリックできなければ即例外発生"""
+    by_method, sel = determine_selector(selector_str)
 
     try:
         el = WebDriverWait(driver, 10).until(EC.element_to_be_clickable((by_method, sel)))
@@ -65,14 +75,9 @@ def click_strict(driver, selector_or_xpath):
         take_screenshot(driver, "ERROR_ClickFailed")
         raise Exception(f"クリック不可: {sel}") from e
 
-def input_strict(driver, selector_or_id, value):
+def input_strict(driver, selector_str, value):
     """入力できなければ即例外発生"""
-    if selector_or_id.startswith("/") or selector_or_id.startswith("("):
-        by_method = By.XPATH
-        sel = selector_or_id
-    else:
-        by_method = By.CSS_SELECTOR
-        sel = selector_or_id if (selector_or_id.startswith("#") or "." in selector_or_id) else f"#{selector_or_id}"
+    by_method, sel = determine_selector(selector_str)
     
     try:
         el = WebDriverWait(driver, 10).until(EC.visibility_of_element_located((by_method, sel)))
@@ -84,10 +89,9 @@ def input_strict(driver, selector_or_id, value):
         raise Exception(f"入力失敗: {sel}") from e
 
 def select_radio_strict(driver, name_attr, value):
-    """ラジオボタン選択（仕様書のname属性対応）"""
+    """ラジオボタン選択"""
     xpath = f"//input[@name='{name_attr}' and @value='{value}']"
     try:
-        # 親要素ごとクリックするなどして確実に選択
         el = WebDriverWait(driver, 10).until(EC.presence_of_element_located((By.XPATH, xpath)))
         driver.execute_script("arguments[0].click();", el)
         print(f"   [OK] Radio: {name_attr}={value}")
@@ -97,7 +101,6 @@ def select_radio_strict(driver, name_attr, value):
 
 def switch_tab(driver, tab_text):
     """タブ切り替え"""
-    # 成功ファイルのXPathロジックを維持しつつ拡張
     xpath = f"//div[contains(@class,'tab-button')][contains(.,'{tab_text}')] | //li[contains(text(),'{tab_text}')] | //a[contains(text(),'{tab_text}')]"
     try:
         click_strict(driver, xpath)
@@ -107,7 +110,7 @@ def switch_tab(driver, tab_text):
         print(f"   [WARNING] Tab '{tab_text}' click failed.")
 
 def wait_for_index(driver):
-    """一覧画面に戻るのを待機 (各フェーズ完了後用)"""
+    """一覧画面に戻るのを待機"""
     print("   一覧画面への遷移を待機中...")
     try:
         WebDriverWait(driver, 20).until(EC.url_contains("search"))
@@ -121,9 +124,8 @@ def wait_for_index(driver):
 # メイン処理
 # ==========================================
 def main():
-    print("=== Automation Start (Strict Mode: Integrated) ===")
+    print("=== Automation Start (Fixed Selector Logic) ===")
 
-    # 1. 引数取得 (YAML修正対応: JSONペイロード)
     if len(sys.argv) < 2:
         print("Error: No payload provided.")
         sys.exit(1)
@@ -133,7 +135,6 @@ def main():
         data = json.loads(payload_str)
         
         target_plate = data.get('plate')
-        # URLが空ならデフォルトを使用
         target_url = data.get('target_url') or DEFAULT_LOGIN_URL
         tire_data = data.get('tire_data', {})
         
@@ -150,7 +151,7 @@ def main():
     driver = get_chrome_driver()
 
     try:
-        # --- [1] ログイン (成功ファイル準拠) ---
+        # --- [1] ログイン ---
         print("\n--- [1] ログイン開始 ---")
         driver.get(target_url)
         
@@ -160,22 +161,17 @@ def main():
         input_strict(driver, "#password", TMA_PW)
         click_strict(driver, ".btn-primary") # または input[type='submit']
         
-        # --- [1.5] メニュー回避 (成功ファイル準拠) ---
-        # ログイン後、メニュー画面なら「予約履歴」等を押して一覧へ
+        # --- [1.5] メニュー回避 ---
         print("\n--- [1.5] メニュー画面遷移 ---")
         try:
              click_strict(driver, "//main//a[contains(@href,'reserve')] | //main//button[contains(text(),'予約履歴')]")
         except:
-             pass # 既に一覧等の場合
+             pass 
 
-        # --- [2] 車両リスト選択 & ポップアップ (成功ファイル準拠) ---
+        # --- [2] 車両リスト選択 & ポップアップ ---
         print("\n--- [2] 車両リスト選択 & 開始ポップアップ ---")
-        # 対象車両の行を特定して、その中の「点検」ボタンを押す必要があるため、XPathを動的に生成
-        # 成功ファイルでは "(//div...)[1]" と固定だったが、対象車両を指定するために修正
         inspection_btn_xpath = f"//td[contains(text(), '{target_plate}')]/..//a[contains(text(), '点検')]"
         
-        # もし対象車両が見つからない場合は、成功ファイル同様に最初のボタンを押すロジック（テスト用）にするか、エラーにするか。
-        # ここでは対象車両特定を優先し、だめなら汎用XPathで試行
         try:
             click_strict(driver, inspection_btn_xpath)
         except:
@@ -187,12 +183,9 @@ def main():
             EC.visibility_of_element_located((By.ID, "posupMessageConfirm"))
         )
         click_strict(driver, "#posupMessageConfirmOk")
-        print("   ポップアップ: 確認ボタン押下")
 
-        # --- [2.5] トップ画面 (点検開始処理) (成功ファイル準拠) ---
+        # --- [2.5] トップ画面 (点検開始処理) ---
         print("\n--- [2.5] トップ画面 (点検開始) ---")
-        
-        print("   トップ画面: 『点検開始』ボタンを押下")
         click_strict(driver, "#startBtnContainer a")
         
         print("   トップ画面: 『日常点検』ボタン有効化待機...")
@@ -200,67 +193,61 @@ def main():
             EC.element_to_be_clickable((By.CSS_SELECTOR, "#dailyBtnContainer a"))
         )
         time.sleep(1) 
-        
-        # 日常点検へ移動
         click_strict(driver, "#dailyBtnContainer a")
         
-        # --- [3] 日常点検入力 (仕様定義書準拠 + GASデータ) ---
+        # --- [3] 日常点検入力 ---
         print("\n--- [3] 入力実行: 日常点検 ---")
         WebDriverWait(driver, 10).until(EC.presence_of_element_located((By.TAG_NAME, "body")))
 
-        # 1. エンジンルーム (Default)
+        # 1. エンジンルーム
         print("   [Step 1] エンジンルーム")
-        # IDが不明確な場合があるが、定義書と推測IDで対応
         try:
             select_radio_strict(driver, "engineOilAmount", "1")
             select_radio_strict(driver, "brakeLiquid", "1")
             select_radio_strict(driver, "radiatorWater", "1")
             select_radio_strict(driver, "batteryLiquid", "1")
-            select_radio_strict(driver, "windowWasherLiquid", "2") # ★OK補充
+            select_radio_strict(driver, "windowWasherLiquid", "2")
         except:
-            # 成功ファイルにあったID群で再トライ（ID名が違う場合の保険）
             click_strict(driver, "coolantGauge1")
             click_strict(driver, "engineOilGauge1")
             click_strict(driver, "washerFluidGauge1")
 
-        # 2. タイヤ (Tab: tire)
+        # 2. タイヤ
         print("   [Step 2] タイヤ")
         switch_tab(driver, "タイヤ")
         select_radio_strict(driver, "tireType", "1")
         select_radio_strict(driver, "tireDamage", "1")
 
         # タイヤデータ入力 (RF->LF->LR->RR)
-        # RF
-        input_strict(driver, "input[name='tireMfrFrontRightCm']", tire_data.get('rf', {}).get('week', ''))
-        input_strict(driver, "input[name='tireGrooveFrontRightCmIp']", str(tire_data.get('rf', {}).get('depth', '5.5')).split('.')[0])
-        if '.' in str(tire_data.get('rf', {}).get('depth', '')):
-            input_strict(driver, "input[name='tireGrooveFrontRightCmFp']", str(tire_data['rf']['depth']).split('.')[1])
-        input_strict(driver, "input[name='tirePressureFrontRightCm']", tire_data.get('rf', {}).get('press', ''))
-        input_strict(driver, "input[name='tirePressureAdjustedFrontRightCm']", tire_data.get('rf', {}).get('press', ''))
+        # ★ここが重要: 修正された input_strict により input[name=...] が正しく機能する
+        wheels = [
+            ('rf', 'FrontRightCm'), 
+            ('lf', 'FrontLeftCm'), 
+            ('lr', 'RearLeftBi4'), 
+            ('rr', 'RearRightBi4')
+        ]
 
-        # LF
-        input_strict(driver, "input[name='tireMfrFrontLeftCm']", tire_data.get('lf', {}).get('week', ''))
-        input_strict(driver, "input[name='tireGrooveFrontLeftCmIp']", str(tire_data.get('lf', {}).get('depth', '5.5')).split('.')[0])
-        if '.' in str(tire_data.get('lf', {}).get('depth', '')):
-            input_strict(driver, "input[name='tireGrooveFrontLeftCmFp']", str(tire_data['lf']['depth']).split('.')[1])
-        input_strict(driver, "input[name='tirePressureFrontLeftCm']", tire_data.get('lf', {}).get('press', ''))
-        input_strict(driver, "input[name='tirePressureAdjustedFrontLeftCm']", tire_data.get('lf', {}).get('press', ''))
-
-        # LR
-        input_strict(driver, "input[name='tireMfrRearLeftBi4']", tire_data.get('lr', {}).get('week', ''))
-        input_strict(driver, "input[name='tireGrooveRearLeftBi4Ip']", str(tire_data.get('lr', {}).get('depth', '5.5')).split('.')[0])
-        if '.' in str(tire_data.get('lr', {}).get('depth', '')):
-            input_strict(driver, "input[name='tireGrooveRearLeftBi4Fp']", str(tire_data['lr']['depth']).split('.')[1])
-        input_strict(driver, "input[name='tirePressureRearLeftBi4']", tire_data.get('lr', {}).get('press', ''))
-        input_strict(driver, "input[name='tirePressureAdjustedRearLeftBi4']", tire_data.get('lr', {}).get('press', ''))
-
-        # RR
-        input_strict(driver, "input[name='tireMfrRearRightBi4']", tire_data.get('rr', {}).get('week', ''))
-        input_strict(driver, "input[name='tireGrooveRearRightBi4Ip']", str(tire_data.get('rr', {}).get('depth', '5.5')).split('.')[0])
-        if '.' in str(tire_data.get('rr', {}).get('depth', '')):
-            input_strict(driver, "input[name='tireGrooveRearRightBi4Fp']", str(tire_data['rr']['depth']).split('.')[1])
-        input_strict(driver, "input[name='tirePressureRearRightBi4']", tire_data.get('rr', {}).get('press', ''))
-        input_strict(driver, "input[name='tirePressureAdjustedRearRightBi4']", tire_data.get('rr', {}).get('press', ''))
+        for pos, suffix in wheels:
+            d = tire_data.get(pos, {})
+            # 週
+            input_strict(driver, f"input[name='tireMfr{suffix}']", d.get('week', ''))
+            
+            # 溝 (整数・小数)
+            depth_str = str(d.get('depth', '5.5'))
+            if '.' in depth_str:
+                ip, fp = depth_str.split('.')
+            else:
+                ip, fp = depth_str, '0'
+            
+            input_strict(driver, f"input[name='tireGroove{suffix}Ip']", ip)
+            # 小数部フィールドがある場合のみ入力（try-exceptで囲むか、存在チェック推奨だがStrictでいく）
+            # 定義書にFpがあると書いてあるので入力
+            input_strict(driver, f"input[name='tireGroove{suffix}Fp']", fp)
+            
+            # 空気圧
+            press = d.get('press', '')
+            input_strict(driver, f"input[name='tirePressure{suffix}']", press)
+            input_strict(driver, f"input[name='tirePressureAdjusted{suffix}']", press)
 
         # 3. 動作確認
         switch_tab(driver, "動作確認")
@@ -294,7 +281,7 @@ def main():
         select_radio_strict(driver, "fuelCap", "1")
         select_radio_strict(driver, "carStickerExist", "1")
 
-        # 7. トランク (再度 車載品タブ)
+        # 7. トランク
         try:
              click_strict(driver, "(//a[contains(text(), '車載品')])[2] | //a[contains(text(), '車載品')]")
         except:
@@ -328,8 +315,7 @@ def main():
         btn_xpath = f"{row_xpath}//a[contains(@href, 'CarWash') or contains(text(), '洗車')]"
         click_strict(driver, btn_xpath)
 
-        # ★洗車不要(2)
-        select_radio_strict(driver, "exteriorDirt", "2")
+        select_radio_strict(driver, "exteriorDirt", "2") # 洗車不要
 
         click_strict(driver, "//input[@value='完了'] | //button[contains(text(), '完了')]")
         wait_for_index(driver)
