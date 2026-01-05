@@ -72,10 +72,7 @@ def click_strict(driver, selector_str):
         raise Exception(f"クリック不可: {sel}") from e
 
 def click_section_button(driver, section_title):
-    """
-    IDがないボタン用: 指定されたセクション名（例: '日常点検'）を含む枠内の「点検」ボタンをクリックする
-    """
-    # 「section_title」の文字を含む pタグを持つ親div(check-state-area) の中にある 「点検」リンクを探すXPath
+    """IDがないボタン用: 指定されたセクション名（例: '日常点検'）を含む枠内の「点検」ボタンをクリックする"""
     xpath = f"//div[contains(@class, 'check-state-area')][.//p[contains(text(), '{section_title}')]]//a[contains(text(), '点検')]"
     
     print(f"   [{section_title}] の開始ボタンを探しています...")
@@ -86,18 +83,33 @@ def click_section_button(driver, section_title):
         raise Exception(f"「{section_title}」の開始ボタンが見つかりません。") from e
 
 def handle_potential_popup(driver):
-    """ボタン押下後に表示される可能性のある確認ポップアップを処理する"""
+    """ボタン押下直後の「確認（よろしいですか？）」ポップアップを処理する"""
     try:
-        # ポップアップの出現を少し待つ（即時遷移する場合もあるため短めに）
         confirm_btn = WebDriverWait(driver, 3).until(
             EC.element_to_be_clickable((By.ID, "posupMessageConfirmOk"))
         )
         print("   確認ポップアップを検知しました。「完了」ボタンを押します...")
         driver.execute_script("arguments[0].click();", confirm_btn)
-        time.sleep(1) # クリック後の処理待ち
+        time.sleep(1)
     except:
-        # ポップアップが出ない、またはタイムアウトした場合は何もしない（そのまま遷移待ちへ）
-        print("   確認ポップアップは表示されませんでした（または即座に遷移しました）")
+        pass # ポップアップが出なければ何もしない
+
+def dismiss_success_modal(driver):
+    """
+    画面遷移後に出現する「完了しました」「一時保存しました」等の報告モーダルを閉じる
+    IDがないボタンにも対応: <input value='閉じる'> を探す
+    """
+    try:
+        # モーダル内の「閉じる」ボタンが表示されるのを少し待つ
+        print("   完了報告モーダル（閉じるボタン）の確認中...")
+        close_btn = WebDriverWait(driver, 5).until(
+            EC.element_to_be_clickable((By.XPATH, "//input[@value='閉じる'] | //button[contains(text(), '閉じる')]"))
+        )
+        print("   完了報告モーダルを検知しました。「閉じる」をクリックします。")
+        driver.execute_script("arguments[0].click();", close_btn)
+        time.sleep(1) # モーダルが消えるのを待つ
+    except:
+        print("   完了報告モーダルは表示されませんでした（または検知できませんでした）")
 
 def input_strict(driver, selector_str, value):
     """入力できなければ即例外発生"""
@@ -124,12 +136,9 @@ def select_radio_strict(driver, name_attr, value):
         raise Exception(f"ラジオボタン選択失敗: {name_attr}={value}") from e
 
 def wait_for_return_page(driver):
-    """
-    工程終了後、一覧(search/index) または 点検トップ(maintenanceTop) に戻るのを待機
-    """
+    """工程終了後、一覧(search/index) または 点検トップ(maintenanceTop) に戻るのを待機"""
     print("   画面遷移を待機中(search/index/maintenanceTop)...")
     try:
-        # 正規表現で戻り先のURLパターンを網羅
         WebDriverWait(driver, 20).until(EC.url_matches(r"(search|index|maintenanceTop)"))
         time.sleep(2)
         print("   -> 画面遷移を確認しました")
@@ -141,7 +150,7 @@ def wait_for_return_page(driver):
 # メイン処理
 # ==========================================
 def main():
-    print("=== Automation Start (Fix: Popup Handling) ===")
+    print("=== Automation Start (Fix: Tire Pressure Logic & Success Modal) ===")
 
     if len(sys.argv) < 2:
         print("Error: No payload provided.")
@@ -210,7 +219,6 @@ def main():
 
         # --- [2.5] トップ画面 (点検開始処理) ---
         print("\n--- [2.5] トップ画面 (点検開始) ---")
-        # ID指定をやめ、セクション名でボタンを探す関数を使用
         click_section_button(driver, "日常点検")
         
         # --- [3] 日常点検入力 ---
@@ -226,17 +234,16 @@ def main():
         select_radio_strict(driver, "brakeFluidGauge", "1")
         select_radio_strict(driver, "washerFluidGauge", "2")
 
-        # 2. タイヤ (4箇所それぞれのラジオボタンを選択)
+        # 2. タイヤ
         print("   [Step 2] タイヤ")
         click_strict(driver, "div[data-name='tire']")
-        
         select_radio_strict(driver, "tireType", "1")
         
-        # タイヤの損傷チェック (前後左右)
-        select_radio_strict(driver, "tireDamageRightFront", "1") # 右前
-        select_radio_strict(driver, "tireDamageLeftFront", "1")  # 左前
-        select_radio_strict(driver, "tireDamageLeftRear", "1")   # 左後
-        select_radio_strict(driver, "tireDamageRightRear", "1")  # 右後
+        # タイヤ損傷 (前後左右)
+        select_radio_strict(driver, "tireDamageRightFront", "1")
+        select_radio_strict(driver, "tireDamageLeftFront", "1")
+        select_radio_strict(driver, "tireDamageLeftRear", "1")
+        select_radio_strict(driver, "tireDamageRightRear", "1")
 
         wheels = [
             ('rf', 'FrontRightCm'), 
@@ -246,20 +253,22 @@ def main():
 
         for pos, suffix in wheels:
             d = tire_data.get(pos, {})
+            # 製造週
             input_strict(driver, f"input[name='tireMfr{suffix}']", d.get('week', ''))
             
+            # 溝の深さ
             depth_str = str(d.get('depth', '5.5'))
             if '.' in depth_str:
                 ip, fp = depth_str.split('.')
             else:
                 ip, fp = depth_str, '0'
-            
             input_strict(driver, f"input[name='tireGroove{suffix}Ip']", ip)
             input_strict(driver, f"input[name='tireGroove{suffix}Fp']", fp)
             
+            # 空気圧 (調整前のみ入力し、調整後はスキップ)
             press = d.get('press', '')
             input_strict(driver, f"input[name='tirePressure{suffix}']", press)
-            input_strict(driver, f"input[name='tirePressureAdjusted{suffix}']", press)
+            # input_strict(driver, f"input[name='tirePressureAdjusted{suffix}']", press) # スキップ
 
         # 3. 動作確認
         print("   [Step 3] 動作確認")
@@ -307,11 +316,12 @@ def main():
         select_radio_strict(driver, "puncRepairKitExist", "1")
         select_radio_strict(driver, "cleaningKit", "1")
 
-        # 一時保存 (修正: input[name='doOnceTemporary'] を指定し、直後にポップアップ処理を追加)
+        # 一時保存
         print("   一時保存をクリック...")
         click_strict(driver, "input[name='doOnceTemporary']")
-        handle_potential_popup(driver)
-        wait_for_return_page(driver)
+        handle_potential_popup(driver) # 確認ダイアログ処理
+        wait_for_return_page(driver)   # 画面遷移待ち
+        dismiss_success_modal(driver)  # 完了報告モーダルを閉じる
 
         
         # --- [4] 車内清掃フェーズ ---
@@ -323,11 +333,12 @@ def main():
         select_radio_strict(driver, "soundVolume", "1")
         select_radio_strict(driver, "lostArticle", "1")
 
-        # 完了ボタン (修正: input[name='doOnceSave'] を指定し、直後にポップアップ処理を追加)
+        # 完了ボタン
         print("   完了ボタンをクリック...")
         click_strict(driver, "input[name='doOnceSave']")
         handle_potential_popup(driver)
         wait_for_return_page(driver)
+        dismiss_success_modal(driver) # 完了報告モーダルを閉じる
 
         # --- [5] 洗車フェーズ ---
         print("\n--- [5] 洗車フェーズ ---")
@@ -339,6 +350,7 @@ def main():
         click_strict(driver, "input[name='doOnceSave']")
         handle_potential_popup(driver)
         wait_for_return_page(driver)
+        dismiss_success_modal(driver)
 
         # --- [6] 外装確認フェーズ ---
         print("\n--- [6] 外装確認フェーズ ---")
@@ -350,6 +362,7 @@ def main():
         click_strict(driver, "input[name='doOnceSave']")
         handle_potential_popup(driver)
         wait_for_return_page(driver)
+        dismiss_success_modal(driver)
 
         print("\n=== SUCCESS: 全工程完了 ===")
         sys.exit(0)
