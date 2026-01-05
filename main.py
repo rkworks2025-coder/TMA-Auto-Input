@@ -115,7 +115,7 @@ def wait_for_index(driver):
 # メイン処理
 # ==========================================
 def main():
-    print("=== Automation Start (Final Verified Version / Skipped Start Button) ===")
+    print("=== Automation Start (Final Verified Version) ===")
 
     if len(sys.argv) < 2:
         print("Error: No payload provided.")
@@ -159,36 +159,48 @@ def main():
         except:
              pass 
 
-        # --- [2] 車両リスト選択 & ポップアップ ---
+        # --- [2] 車両リスト選択 & ポップアップ (修正版) ---
         print("\n--- [2] 車両リスト選択 & 開始ポップアップ ---")
-        inspection_btn_xpath = f"//td[contains(text(), '{target_plate}')]/..//a[contains(text(), '点検')]"
-        
         try:
-            click_strict(driver, inspection_btn_xpath)
-        except:
-            print(f"   Target plate {target_plate} not found, trying generic inspection button.")
-            click_strict(driver, "(//div[contains(@class, 'other-btn-area')]//a[contains(text(), '点検')])[1]")
+            # 1. 「点検」ボタン（リンク）を特定してクリック
+            # IDがないため、XPathで「点検」というテキストを含むリンク（aタグ）を探します
+            print("   「点検」ボタンを探しています...")
+            inspection_btn = WebDriverWait(driver, 10).until(
+                EC.element_to_be_clickable((By.XPATH, "//span[@class='link-btn']/a[contains(text(), '点検')]"))
+            )
+            inspection_btn.click()
+            print("   「点検」ボタンをクリックしました。")
 
-        print("   ポップアップ: 表示待機中...")
-        WebDriverWait(driver, 10).until(
-            EC.visibility_of_element_located((By.ID, "posupMessageConfirm"))
-        )
-        click_strict(driver, "#posupMessageConfirmOk")
+            # 2. 確認ポップアップが表示されるので、その中の「完了」ボタンをクリック
+            # ソースコードの ID="posupMessageConfirmOk" をターゲットにします
+            print("   確認ポップアップの「完了」ボタンを待機中...")
+            confirm_btn = WebDriverWait(driver, 10).until(
+                EC.element_to_be_clickable((By.ID, "posupMessageConfirmOk"))
+            )
+            
+            # ポップアップのアニメーション等でクリックできない場合を防ぐため、念のためJavaScriptでクリック
+            driver.execute_script("arguments[0].click();", confirm_btn)
+            print("   ポップアップの「完了」ボタンをクリックしました。")
 
-        # --- [2.5] トップ画面 (点検開始処理 - スキップ版) ---
-        print("\n--- [2.5] トップ画面 (日常点検へ遷移) ---")
+            # 画面遷移のための待機
+            time.sleep(5)
+
+        except Exception as e:
+            print(f"   [Error] 車両選択/ポップアップ処理でエラー: {e}")
+            take_screenshot(driver, "ERROR_Step2_InspectionClick")
+            raise e
+
+        # --- [2.5] トップ画面 (点検開始処理) ---
+        print("\n--- [2.5] トップ画面 (点検開始) ---")
+        click_strict(driver, "#startBtnContainer a")
         
-        # 以前の処理: 点検開始ボタン(#startBtnContainer a)を押す -> 削除
-        # 変更後の処理: すでに開始済み前提のため、直接「日常点検」ボタンを押す
-        
-        print("   トップ画面: 『日常点検』ボタンをクリック...")
-        # 念のため要素が表示されるのを軽く待つ
-        WebDriverWait(driver, 10).until(
-             EC.visibility_of_element_located((By.CSS_SELECTOR, "#dailyBtnContainer a"))
+        print("   トップ画面: 『日常点検』ボタン有効化待機...")
+        WebDriverWait(driver, 15).until(
+            EC.element_to_be_clickable((By.CSS_SELECTOR, "#dailyBtnContainer a"))
         )
+        time.sleep(1) 
         click_strict(driver, "#dailyBtnContainer a")
         
-
         # --- [3] 日常点検入力 (data-name使用) ---
         print("\n--- [3] 入力実行: 日常点検 ---")
         WebDriverWait(driver, 10).until(EC.presence_of_element_located((By.TAG_NAME, "body")))
@@ -210,7 +222,8 @@ def main():
         select_radio_strict(driver, "tireDamage", "1")
 
         wheels = [
-            ('rf', 'FrontRightCm'), ('lf', 'FrontLeftCm'), 
+            ('rf', 'FrontRightCm'), 
+            ('lf', 'FrontLeftCm'), 
             ('lr', 'RearLeftBi4'), ('rr', 'RearRightBi4')
         ]
 
