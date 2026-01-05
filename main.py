@@ -3,8 +3,6 @@ import os
 import time
 import datetime
 import json
-import requests
-import re
 from selenium import webdriver
 from selenium.webdriver.chrome.options import Options
 from selenium.webdriver.chrome.service import Service
@@ -48,17 +46,15 @@ def take_screenshot(driver, name):
         print("   [写] 撮影失敗")
 
 def determine_selector(selector_str):
-    """
-    文字列からXPathかCSSセレクタか、単なるIDかを判定して返す
-    """
+    """文字列からXPathかCSSセレクタか、単なるIDかを判定して返す"""
     if selector_str.startswith("/") or selector_str.startswith("("):
         return By.XPATH, selector_str
     
-    # CSSセレクタとみなす条件: #, ., [, >, : を含む場合
+    # CSSセレクタとみなす条件
     if any(char in selector_str for char in ['#', '.', '[', ']', '>', ':']):
         return By.CSS_SELECTOR, selector_str
     
-    # それ以外はIDとみなして # を付与
+    # それ以外はIDとみなす
     return By.CSS_SELECTOR, f"#{selector_str}"
 
 def click_strict(driver, selector_str):
@@ -74,6 +70,20 @@ def click_strict(driver, selector_str):
     except Exception as e:
         take_screenshot(driver, "ERROR_ClickFailed")
         raise Exception(f"クリック不可: {sel}") from e
+
+def click_section_button(driver, section_title):
+    """
+    IDがないボタン用: 指定されたセクション名（例: '日常点検'）を含む枠内の「点検」ボタンをクリックする
+    """
+    # 「section_title」の文字を含む pタグを持つ親div(check-state-area) の中にある 「点検」リンクを探すXPath
+    xpath = f"//div[contains(@class, 'check-state-area')][.//p[contains(text(), '{section_title}')]]//a[contains(text(), '点検')]"
+    
+    print(f"   [{section_title}] の開始ボタンを探しています...")
+    try:
+        click_strict(driver, xpath)
+    except Exception as e:
+        take_screenshot(driver, f"ERROR_SectionClick_{section_title}")
+        raise Exception(f"「{section_title}」の開始ボタンが見つかりません。") from e
 
 def input_strict(driver, selector_str, value):
     """入力できなければ即例外発生"""
@@ -99,23 +109,25 @@ def select_radio_strict(driver, name_attr, value):
         take_screenshot(driver, f"ERROR_Radio_{name_attr}")
         raise Exception(f"ラジオボタン選択失敗: {name_attr}={value}") from e
 
-def wait_for_index(driver):
-    """一覧画面(詳細トップ)に戻るのを待機 (本番:search / テスト:index 両対応)"""
-    print("   一覧画面への遷移を待機中(search/index)...")
+def wait_for_return_page(driver):
+    """
+    工程終了後、一覧(search/index) または 点検トップ(maintenanceTop) に戻るのを待機
+    """
+    print("   画面遷移を待機中(search/index/maintenanceTop)...")
     try:
-        # 正規表現で search または index がURLに含まれるのを待つ
-        WebDriverWait(driver, 20).until(EC.url_matches(r"(search|index)"))
+        # 正規表現で戻り先のURLパターンを網羅
+        WebDriverWait(driver, 20).until(EC.url_matches(r"(search|index|maintenanceTop)"))
         time.sleep(2)
-        print("   -> 一覧画面に戻りました")
+        print("   -> 画面遷移を確認しました")
     except:
-        take_screenshot(driver, "ERROR_ReturnIndex")
-        raise Exception("一覧画面に戻れませんでした")
+        take_screenshot(driver, "ERROR_ReturnPage")
+        raise Exception("期待する戻り画面(一覧または点検トップ)に遷移しませんでした")
 
 # ==========================================
 # メイン処理
 # ==========================================
 def main():
-    print("=== Automation Start (Final Verified Version) ===")
+    print("=== Automation Start (Fix: No-ID Button Support) ===")
 
     if len(sys.argv) < 2:
         print("Error: No payload provided.")
@@ -159,11 +171,10 @@ def main():
         except:
              pass 
 
-        # --- [2] 車両リスト選択 & ポップアップ (修正版) ---
+        # --- [2] 車両リスト選択 & ポップアップ ---
         print("\n--- [2] 車両リスト選択 & 開始ポップアップ ---")
         try:
-            # 1. 「点検」ボタン（リンク）を特定してクリック
-            # IDがないため、XPathで「点検」というテキストを含むリンク（aタグ）を探します
+            # 1. 「点検」ボタンをクリック (IDなし対応)
             print("   「点検」ボタンを探しています...")
             inspection_btn = WebDriverWait(driver, 10).until(
                 EC.element_to_be_clickable((By.XPATH, "//span[@class='link-btn']/a[contains(text(), '点検')]"))
@@ -171,19 +182,17 @@ def main():
             inspection_btn.click()
             print("   「点検」ボタンをクリックしました。")
 
-            # 2. 確認ポップアップが表示されるので、その中の「完了」ボタンをクリック
-            # ソースコードの ID="posupMessageConfirmOk" をターゲットにします
+            # 2. 確認ポップアップの「完了」ボタンをクリック (ID: posupMessageConfirmOk)
             print("   確認ポップアップの「完了」ボタンを待機中...")
             confirm_btn = WebDriverWait(driver, 10).until(
                 EC.element_to_be_clickable((By.ID, "posupMessageConfirmOk"))
             )
-            
-            # ポップアップのアニメーション等でクリックできない場合を防ぐため、念のためJavaScriptでクリック
             driver.execute_script("arguments[0].click();", confirm_btn)
             print("   ポップアップの「完了」ボタンをクリックしました。")
 
-            # 画面遷移のための待機
+            # 画面遷移待機 (maintenanceTopへ)
             time.sleep(5)
+            wait_for_return_page(driver)
 
         except Exception as e:
             print(f"   [Error] 車両選択/ポップアップ処理でエラー: {e}")
@@ -192,16 +201,10 @@ def main():
 
         # --- [2.5] トップ画面 (点検開始処理) ---
         print("\n--- [2.5] トップ画面 (点検開始) ---")
-        click_strict(driver, "#startBtnContainer a")
+        # ID指定をやめ、セクション名でボタンを探す関数を使用
+        click_section_button(driver, "日常点検")
         
-        print("   トップ画面: 『日常点検』ボタン有効化待機...")
-        WebDriverWait(driver, 15).until(
-            EC.element_to_be_clickable((By.CSS_SELECTOR, "#dailyBtnContainer a"))
-        )
-        time.sleep(1) 
-        click_strict(driver, "#dailyBtnContainer a")
-        
-        # --- [3] 日常点検入力 (data-name使用) ---
+        # --- [3] 日常点検入力 ---
         print("\n--- [3] 入力実行: 日常点検 ---")
         WebDriverWait(driver, 10).until(EC.presence_of_element_located((By.TAG_NAME, "body")))
 
@@ -290,42 +293,61 @@ def main():
         select_radio_strict(driver, "puncRepairKitExist", "1")
         select_radio_strict(driver, "cleaningKit", "1")
 
-        # 一時保存 (HTML: <a class="is-stop" ...>)
+        # 一時保存 (class="is-stop" または テキスト"一時保存"でクリック)
         print("   一時保存をクリック...")
-        click_strict(driver, "a.is-stop") # class指定で明確化
-        wait_for_index(driver)
+        try:
+            click_strict(driver, "//a[contains(@class, 'is-stop') or contains(text(), '一時保存')]")
+        except:
+            click_strict(driver, "a.is-stop")
+            
+        wait_for_return_page(driver)
 
         
         # --- [4] 車内清掃フェーズ ---
         print("\n--- [4] 車内清掃フェーズ ---")
-        click_strict(driver, "#interiorBtnContainer a") # ID指定
+        click_section_button(driver, "車内清掃")
 
         select_radio_strict(driver, "interiorDirt", "1")
         select_radio_strict(driver, "interiorCheckTrouble", "1")
         select_radio_strict(driver, "soundVolume", "1")
         select_radio_strict(driver, "lostArticle", "1")
 
-        # 完了ボタン修正: aタグのis-completeを狙う
-        click_strict(driver, "a.is-complete")
-        wait_for_index(driver)
+        # 完了ボタン (class="is-complete" または テキスト"完了"でクリック)
+        print("   完了ボタンをクリック...")
+        try:
+            click_strict(driver, "//a[contains(@class, 'is-complete') or contains(text(), '完了')]")
+        except:
+            click_strict(driver, "a.is-complete")
+            
+        wait_for_return_page(driver)
 
         # --- [5] 洗車フェーズ ---
         print("\n--- [5] 洗車フェーズ ---")
-        click_strict(driver, "#washBtnContainer a") # ID指定
+        click_section_button(driver, "洗車")
 
         select_radio_strict(driver, "exteriorDirt", "2") # 洗車不要
 
-        click_strict(driver, "a.is-complete")
-        wait_for_index(driver)
+        print("   完了ボタンをクリック...")
+        try:
+            click_strict(driver, "//a[contains(@class, 'is-complete') or contains(text(), '完了')]")
+        except:
+            click_strict(driver, "a.is-complete")
+
+        wait_for_return_page(driver)
 
         # --- [6] 外装確認フェーズ ---
         print("\n--- [6] 外装確認フェーズ ---")
-        click_strict(driver, "#exteriorBtnContainer a") # ID指定
+        click_section_button(driver, "外装確認")
 
         select_radio_strict(driver, "exteriorState", "1")
 
-        click_strict(driver, "a.is-complete")
-        wait_for_index(driver)
+        print("   完了ボタンをクリック...")
+        try:
+            click_strict(driver, "//a[contains(@class, 'is-complete') or contains(text(), '完了')]")
+        except:
+            click_strict(driver, "a.is-complete")
+            
+        wait_for_return_page(driver)
 
         print("\n=== SUCCESS: 全工程完了 ===")
         sys.exit(0)
