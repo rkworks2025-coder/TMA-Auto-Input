@@ -85,6 +85,20 @@ def click_section_button(driver, section_title):
         take_screenshot(driver, f"ERROR_SectionClick_{section_title}")
         raise Exception(f"「{section_title}」の開始ボタンが見つかりません。") from e
 
+def handle_potential_popup(driver):
+    """ボタン押下後に表示される可能性のある確認ポップアップを処理する"""
+    try:
+        # ポップアップの出現を少し待つ（即時遷移する場合もあるため短めに）
+        confirm_btn = WebDriverWait(driver, 3).until(
+            EC.element_to_be_clickable((By.ID, "posupMessageConfirmOk"))
+        )
+        print("   確認ポップアップを検知しました。「完了」ボタンを押します...")
+        driver.execute_script("arguments[0].click();", confirm_btn)
+        time.sleep(1) # クリック後の処理待ち
+    except:
+        # ポップアップが出ない、またはタイムアウトした場合は何もしない（そのまま遷移待ちへ）
+        print("   確認ポップアップは表示されませんでした（または即座に遷移しました）")
+
 def input_strict(driver, selector_str, value):
     """入力できなければ即例外発生"""
     by_method, sel = determine_selector(selector_str)
@@ -127,7 +141,7 @@ def wait_for_return_page(driver):
 # メイン処理
 # ==========================================
 def main():
-    print("=== Automation Start (Fix: Tire Damage & Submit Buttons) ===")
+    print("=== Automation Start (Fix: Popup Handling) ===")
 
     if len(sys.argv) < 2:
         print("Error: No payload provided.")
@@ -182,13 +196,8 @@ def main():
             inspection_btn.click()
             print("   「点検」ボタンをクリックしました。")
 
-            # 2. 確認ポップアップの「完了」ボタンをクリック (ID: posupMessageConfirmOk)
-            print("   確認ポップアップの「完了」ボタンを待機中...")
-            confirm_btn = WebDriverWait(driver, 10).until(
-                EC.element_to_be_clickable((By.ID, "posupMessageConfirmOk"))
-            )
-            driver.execute_script("arguments[0].click();", confirm_btn)
-            print("   ポップアップの「完了」ボタンをクリックしました。")
+            # 2. 確認ポップアップの処理
+            handle_potential_popup(driver)
 
             # 画面遷移待機 (maintenanceTopへ)
             time.sleep(5)
@@ -217,7 +226,7 @@ def main():
         select_radio_strict(driver, "brakeFluidGauge", "1")
         select_radio_strict(driver, "washerFluidGauge", "2")
 
-        # 2. タイヤ (修正: 4箇所それぞれのラジオボタンを選択)
+        # 2. タイヤ (4箇所それぞれのラジオボタンを選択)
         print("   [Step 2] タイヤ")
         click_strict(driver, "div[data-name='tire']")
         
@@ -298,13 +307,10 @@ def main():
         select_radio_strict(driver, "puncRepairKitExist", "1")
         select_radio_strict(driver, "cleaningKit", "1")
 
-        # 一時保存 (修正: inputタグとaタグ両方に対応)
+        # 一時保存 (修正: input[name='doOnceTemporary'] を指定し、直後にポップアップ処理を追加)
         print("   一時保存をクリック...")
-        try:
-            click_strict(driver, "//input[@name='doOnceTemporary'] | //a[contains(@class, 'is-stop') or contains(text(), '一時保存')]")
-        except:
-            click_strict(driver, "input.is-break")
-            
+        click_strict(driver, "input[name='doOnceTemporary']")
+        handle_potential_popup(driver)
         wait_for_return_page(driver)
 
         
@@ -317,13 +323,10 @@ def main():
         select_radio_strict(driver, "soundVolume", "1")
         select_radio_strict(driver, "lostArticle", "1")
 
-        # 完了ボタン (修正: inputタグとaタグ両方に対応)
+        # 完了ボタン (修正: input[name='doOnceSave'] を指定し、直後にポップアップ処理を追加)
         print("   完了ボタンをクリック...")
-        try:
-            click_strict(driver, "//input[@value='完了'] | //a[contains(@class, 'is-complete') or contains(text(), '完了')]")
-        except:
-            click_strict(driver, "input.complete-button")
-            
+        click_strict(driver, "input[name='doOnceSave']")
+        handle_potential_popup(driver)
         wait_for_return_page(driver)
 
         # --- [5] 洗車フェーズ ---
@@ -333,11 +336,8 @@ def main():
         select_radio_strict(driver, "exteriorDirt", "2") # 洗車不要
 
         print("   完了ボタンをクリック...")
-        try:
-            click_strict(driver, "//input[@value='完了'] | //a[contains(@class, 'is-complete') or contains(text(), '完了')]")
-        except:
-            click_strict(driver, "input.complete-button")
-
+        click_strict(driver, "input[name='doOnceSave']")
+        handle_potential_popup(driver)
         wait_for_return_page(driver)
 
         # --- [6] 外装確認フェーズ ---
@@ -347,11 +347,8 @@ def main():
         select_radio_strict(driver, "exteriorState", "1")
 
         print("   完了ボタンをクリック...")
-        try:
-            click_strict(driver, "//input[@value='完了'] | //a[contains(@class, 'is-complete') or contains(text(), '完了')]")
-        except:
-            click_strict(driver, "input.complete-button")
-            
+        click_strict(driver, "input[name='doOnceSave']")
+        handle_potential_popup(driver)
         wait_for_return_page(driver)
 
         print("\n=== SUCCESS: 全工程完了 ===")
