@@ -127,7 +127,7 @@ def wait_for_return_page(driver):
 # メイン処理
 # ==========================================
 def main():
-    print("=== Automation Start (Fix: No-ID Button Support) ===")
+    print("=== Automation Start (Fix: Tire Damage & Submit Buttons) ===")
 
     if len(sys.argv) < 2:
         print("Error: No payload provided.")
@@ -217,12 +217,17 @@ def main():
         select_radio_strict(driver, "brakeFluidGauge", "1")
         select_radio_strict(driver, "washerFluidGauge", "2")
 
-        # 2. タイヤ
+        # 2. タイヤ (修正: 4箇所それぞれのラジオボタンを選択)
         print("   [Step 2] タイヤ")
         click_strict(driver, "div[data-name='tire']")
         
         select_radio_strict(driver, "tireType", "1")
-        select_radio_strict(driver, "tireDamage", "1")
+        
+        # タイヤの損傷チェック (前後左右)
+        select_radio_strict(driver, "tireDamageRightFront", "1") # 右前
+        select_radio_strict(driver, "tireDamageLeftFront", "1")  # 左前
+        select_radio_strict(driver, "tireDamageLeftRear", "1")   # 左後
+        select_radio_strict(driver, "tireDamageRightRear", "1")  # 右後
 
         wheels = [
             ('rf', 'FrontRightCm'), 
@@ -293,12 +298,12 @@ def main():
         select_radio_strict(driver, "puncRepairKitExist", "1")
         select_radio_strict(driver, "cleaningKit", "1")
 
-        # 一時保存 (class="is-stop" または テキスト"一時保存"でクリック)
+        # 一時保存 (修正: inputタグとaタグ両方に対応)
         print("   一時保存をクリック...")
         try:
-            click_strict(driver, "//a[contains(@class, 'is-stop') or contains(text(), '一時保存')]")
+            click_strict(driver, "//input[@name='doOnceTemporary'] | //a[contains(@class, 'is-stop') or contains(text(), '一時保存')]")
         except:
-            click_strict(driver, "a.is-stop")
+            click_strict(driver, "input.is-break")
             
         wait_for_return_page(driver)
 
@@ -312,12 +317,12 @@ def main():
         select_radio_strict(driver, "soundVolume", "1")
         select_radio_strict(driver, "lostArticle", "1")
 
-        # 完了ボタン (class="is-complete" または テキスト"完了"でクリック)
+        # 完了ボタン (修正: inputタグとaタグ両方に対応)
         print("   完了ボタンをクリック...")
         try:
-            click_strict(driver, "//a[contains(@class, 'is-complete') or contains(text(), '完了')]")
+            click_strict(driver, "//input[@value='完了'] | //a[contains(@class, 'is-complete') or contains(text(), '完了')]")
         except:
-            click_strict(driver, "a.is-complete")
+            click_strict(driver, "input.complete-button")
             
         wait_for_return_page(driver)
 
@@ -329,9 +334,9 @@ def main():
 
         print("   完了ボタンをクリック...")
         try:
-            click_strict(driver, "//a[contains(@class, 'is-complete') or contains(text(), '完了')]")
+            click_strict(driver, "//input[@value='完了'] | //a[contains(@class, 'is-complete') or contains(text(), '完了')]")
         except:
-            click_strict(driver, "a.is-complete")
+            click_strict(driver, "input.complete-button")
 
         wait_for_return_page(driver)
 
@@ -343,9 +348,9 @@ def main():
 
         print("   完了ボタンをクリック...")
         try:
-            click_strict(driver, "//a[contains(@class, 'is-complete') or contains(text(), '完了')]")
+            click_strict(driver, "//input[@value='完了'] | //a[contains(@class, 'is-complete') or contains(text(), '完了')]")
         except:
-            click_strict(driver, "a.is-complete")
+            click_strict(driver, "input.complete-button")
             
         wait_for_return_page(driver)
 
