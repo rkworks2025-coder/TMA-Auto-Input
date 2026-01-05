@@ -46,7 +46,7 @@ def take_screenshot(driver, name):
         print("   [写] 撮影失敗")
 
 def click_strict(driver, selector_str, timeout=10):
-    """汎用クリック関数（要素特定用）"""
+    """汎用クリック関数"""
     by_method = By.XPATH if selector_str.startswith("/") or selector_str.startswith("(") else By.CSS_SELECTOR
     try:
         el = WebDriverWait(driver, timeout).until(EC.element_to_be_clickable((by_method, selector_str)))
@@ -58,34 +58,38 @@ def click_strict(driver, selector_str, timeout=10):
         take_screenshot(driver, "ERROR_ClickFailed")
         raise Exception(f"クリック不可: {selector_str}") from e
 
-def click_footer_button(driver, button_type):
+def click_main_action_button(driver, button_type):
     """
-    【重要修正】画面下部（フッター）にあるボタンのみを厳密に探してクリックする
-    button_type: "save" (一時保存) または "complete" (完了)
+    【最重要修正】
+    ページ上のメイン操作ボタン（一時保存/完了）をクリックする。
+    ただし、隠れているポップアップ(alert-modal)内のボタンは除外する。
     """
     if button_type == "save":
-        # 一時保存ボタン（is-break クラス、または name="doOnceTemporary"）
-        xpath = "//footer//div[contains(@class,'three-footer-button')]//input[contains(@class,'is-break') or @name='doOnceTemporary' or @value='一時保存']"
         label = "一時保存"
+        # class="is-break" または name="doOnceTemporary" または value="一時保存" または テキスト"一時保存"
+        # かつ、親要素に alert-modal を持たないもの
+        base_xpath = "(//input[contains(@class,'is-break')] | //input[@name='doOnceTemporary'] | //input[@value='一時保存'] | //a[contains(text(),'一時保存')])"
     else:
-        # 完了ボタン（complete-button クラス、または name="doOnceSave"）
-        xpath = "//footer//div[contains(@class,'three-footer-button')]//input[contains(@class,'complete-button') or @name='doOnceSave' or @value='完了']"
         label = "完了"
+        # class="complete-button" または name="doOnceSave" または value="完了" または テキスト"完了"
+        # かつ、親要素に alert-modal を持たないもの
+        base_xpath = "(//input[contains(@class,'complete-button')] | //input[@name='doOnceSave'] | //input[@value='完了'] | //a[contains(text(),'完了')])"
 
-    print(f"   フッター内の「{label}」ボタンを探しています...")
+    # ポップアップ内の要素を除外する条件を追加
+    xpath = f"{base_xpath}[not(ancestor::div[contains(@class, 'alert-modal')])]"
+
+    print(f"   画面上の「{label}」ボタン（ポップアップ外）を探しています...")
     try:
-        # フッター内のボタンが見えるまで待機（隠れているポップアップ内のボタンは無視される）
-        el = WebDriverWait(driver, 10).until(EC.visibility_of_element_located((By.XPATH, xpath)))
+        el = WebDriverWait(driver, 10).until(EC.element_to_be_clickable((By.XPATH, xpath)))
         driver.execute_script("arguments[0].scrollIntoView({block: 'center'});", el)
         time.sleep(0.5)
         el.click()
-        print(f"   [OK] Footer Click: {label}")
+        print(f"   [OK] Main Action Click: {label}")
     except Exception as e:
-        take_screenshot(driver, f"ERROR_FooterClick_{label}")
-        raise Exception(f"フッター内の「{label}」ボタンが見つかりません。隠れ要素に邪魔されている可能性があります。") from e
+        take_screenshot(driver, f"ERROR_MainAction_{label}")
+        raise Exception(f"「{label}」ボタンが見つかりません。") from e
 
 def click_section_button(driver, section_title):
-    """セクション名から開始ボタンを探す"""
     xpath = f"//div[contains(@class, 'check-state-area')][.//p[contains(text(), '{section_title}')]]//a[contains(text(), '点検')]"
     print(f"   [{section_title}] の開始ボタンを探しています...")
     try:
@@ -109,11 +113,11 @@ def handle_popups(driver):
         driver.execute_script("arguments[0].click();", confirm_btn)
         time.sleep(1)
     except:
-        pass # 出なければ次へ
+        pass 
 
     # 2. 完了報告モーダル（画面遷移を阻害するやつ）
     try:
-        # 少し長めに待つ（非同期処理後のため）
+        # alert-modalの中にある「閉じる」ボタンを探す
         close_btn = WebDriverWait(driver, 5).until(
             EC.element_to_be_clickable((By.XPATH, "//div[contains(@class,'alert-modal')]//input[@value='閉じる'] | //div[contains(@class,'alert-modal')]//button[contains(text(),'閉じる')]"))
         )
@@ -121,7 +125,7 @@ def handle_popups(driver):
         driver.execute_script("arguments[0].click();", close_btn)
         time.sleep(1)
     except:
-        pass # 出なければ次へ
+        pass 
 
 def input_strict(driver, selector_str, value):
     by_method = By.XPATH if selector_str.startswith("/") else By.CSS_SELECTOR
@@ -179,7 +183,7 @@ def wait_for_return_page(driver):
 # メイン処理
 # ==========================================
 def main():
-    print("=== Automation Start (Fix: Footer Targeted Click) ===")
+    print("=== Automation Start (Final Fix: Popup Exclusion Logic) ===")
 
     if len(sys.argv) < 2:
         print("Error: No payload provided.")
@@ -190,6 +194,8 @@ def main():
         data = json.loads(payload_str)
         target_url = data.get('target_url') or DEFAULT_LOGIN_URL
         tire_data = data.get('tire_data', {})
+        
+        print(f"Target Plate: {data.get('plate')}")
     except Exception as e:
         print(f"Error parsing payload: {e}")
         sys.exit(1)
@@ -206,23 +212,20 @@ def main():
         input_strict(driver, "#password", TMA_PW)
         click_strict(driver, ".btn-primary")
         
-        # メニュー回避
         try: click_strict(driver, "//main//a[contains(@href,'reserve')] | //main//button[contains(text(),'予約履歴')]", timeout=3)
         except: pass 
 
-        # [2] 車両選択（点検開始）
+        # [2] 点検開始
         print("\n--- [2] 点検開始 ---")
         try:
-            # 「点検」ボタン
             click_strict(driver, "//span[@class='link-btn']/a[contains(text(), '点検')]")
-            # 確認ポップアップ -> 完了
             handle_popups(driver)
             wait_for_return_page(driver)
         except Exception as e:
             print(f"   [Error] 開始処理失敗: {e}")
             raise e
 
-        # [2.5] トップ画面から日常点検へ
+        # [2.5] 日常点検開始
         print("\n--- [2.5] 日常点検開始 ---")
         click_section_button(driver, "日常点検")
         
@@ -240,7 +243,6 @@ def main():
         # タイヤ
         click_strict(driver, "div[data-name='tire']")
         select_radio_strict(driver, "tireType", "1")
-        # 損傷チェック（4箇所）
         select_radio_strict(driver, "tireDamageRightFront", "1")
         select_radio_strict(driver, "tireDamageLeftFront", "1")
         select_radio_strict(driver, "tireDamageLeftRear", "1")
@@ -257,7 +259,7 @@ def main():
             input_strict(driver, f"input[name='tireGroove{suffix}Ip']", ip)
             input_strict(driver, f"input[name='tireGroove{suffix}Fp']", fp)
             
-            # 空気圧（調整前のみ入力）
+            # 空気圧（調整前のみ）
             input_strict(driver, f"input[name='tirePressure{suffix}']", d.get('press', ''))
 
         # 動作確認
@@ -300,17 +302,18 @@ def main():
         select_radio_strict(driver, "puncRepairKitExist", "1")
         select_radio_strict(driver, "cleaningKit", "1")
 
-        # === 一時保存（フッター限定クリック） ===
-        click_footer_button(driver, "save")
+        # === 一時保存 ===
+        print("   一時保存をクリック...")
+        click_main_action_button(driver, "save")
         handle_popups(driver)
         wait_for_return_page(driver)
 
         # [4] 車内清掃
         print("\n--- [4] 車内清掃 ---")
         click_section_button(driver, "車内清掃")
-        select_all_radio_first_option(driver) # 自動全選択
+        select_all_radio_first_option(driver)
         
-        click_footer_button(driver, "complete") # フッター限定クリック
+        click_main_action_button(driver, "complete")
         handle_popups(driver)
         wait_for_return_page(driver)
 
@@ -319,7 +322,7 @@ def main():
         click_section_button(driver, "洗車")
         select_radio_strict(driver, "exteriorDirt", "2")
         
-        click_footer_button(driver, "complete")
+        click_main_action_button(driver, "complete")
         handle_popups(driver)
         wait_for_return_page(driver)
 
@@ -328,7 +331,7 @@ def main():
         click_section_button(driver, "外装確認")
         select_radio_strict(driver, "exteriorState", "1")
         
-        click_footer_button(driver, "complete")
+        click_main_action_button(driver, "complete")
         handle_popups(driver)
         wait_for_return_page(driver)
 
