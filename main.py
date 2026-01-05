@@ -189,7 +189,7 @@ def wait_for_return_page(driver):
 # メイン処理
 # ==========================================
 def main():
-    print("=== Automation Start (Final Fix: Robust Button Click) ===")
+    print("=== Automation Start (Fix: Pure XPath Selectors) ===")
 
     if len(sys.argv) < 2:
         print("Error: No payload provided.")
@@ -355,10 +355,11 @@ def main():
         select_radio_strict(driver, "puncRepairKitExist", "1")
         select_radio_strict(driver, "cleaningKit", "1")
 
-        # 一時保存 (汎用セレクタ使用)
+        # 一時保存 (すべてXPathで記述して混在を解消)
         print("   一時保存をクリック...")
-        # 「一時保存」という文字を含むボタン、または特定のクラス、または特定のinput名を探す
-        click_strict(driver, "//input[@value='一時保存'] | //a[contains(text(), '一時保存')] | input[name='doOnceTemporary'] | .is-break")
+        # ボタンの文字、inputのname属性、class属性をXPathですべて網羅
+        temp_save_xpath = "//input[@value='一時保存'] | //a[contains(text(), '一時保存')] | //input[@name='doOnceTemporary'] | //*[contains(@class, 'is-break')]"
+        click_strict(driver, temp_save_xpath)
         
         handle_potential_popup(driver) # 確認ダイアログ処理
         wait_for_return_page(driver)   # 画面遷移待ち
@@ -372,9 +373,10 @@ def main():
         # 全項目自動選択
         select_all_radio_first_option(driver)
 
-        # 完了ボタン (汎用セレクタ使用)
+        # 完了ボタン (すべてXPathで記述して混在を解消)
         print("   完了ボタンをクリック...")
-        click_strict(driver, "//input[@value='完了'] | //a[contains(text(), '完了')] | .complete-button")
+        complete_btn_xpath = "//input[@value='完了'] | //a[contains(text(), '完了')] | //*[contains(@class, 'complete-button')] | //*[contains(@class, 'is-complete')]"
+        click_strict(driver, complete_btn_xpath)
         
         handle_potential_popup(driver)
         wait_for_return_page(driver)
@@ -387,7 +389,7 @@ def main():
         select_radio_strict(driver, "exteriorDirt", "2") # 洗車不要
 
         print("   完了ボタンをクリック...")
-        click_strict(driver, "//input[@value='完了'] | //a[contains(text(), '完了')] | .complete-button")
+        click_strict(driver, complete_btn_xpath)
         
         handle_potential_popup(driver)
         wait_for_return_page(driver)
@@ -400,7 +402,7 @@ def main():
         select_radio_strict(driver, "exteriorState", "1")
 
         print("   完了ボタンをクリック...")
-        click_strict(driver, "//input[@value='完了'] | //a[contains(text(), '完了')] | .complete-button")
+        click_strict(driver, complete_btn_xpath)
         
         handle_potential_popup(driver)
         wait_for_return_page(driver)
