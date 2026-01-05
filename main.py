@@ -189,7 +189,7 @@ def wait_for_return_page(driver):
 # メイン処理
 # ==========================================
 def main():
-    print("=== Automation Start (Fix: Variable Items & Tire Pressure) ===")
+    print("=== Automation Start (Final Fix: Robust Button Click) ===")
 
     if len(sys.argv) < 2:
         print("Error: No payload provided.")
@@ -304,7 +304,7 @@ def main():
             input_strict(driver, f"input[name='tireGroove{suffix}Ip']", ip)
             input_strict(driver, f"input[name='tireGroove{suffix}Fp']", fp)
             
-            # 空気圧 (修正: 調整前のみ入力)
+            # 空気圧 (調整前のみ入力)
             press = d.get('press', '')
             input_strict(driver, f"input[name='tirePressure{suffix}']", press)
             # input_strict(driver, f"input[name='tirePressureAdjusted{suffix}']", press) # スキップ
@@ -355,9 +355,11 @@ def main():
         select_radio_strict(driver, "puncRepairKitExist", "1")
         select_radio_strict(driver, "cleaningKit", "1")
 
-        # 一時保存
+        # 一時保存 (汎用セレクタ使用)
         print("   一時保存をクリック...")
-        click_strict(driver, "input[name='doOnceTemporary']")
+        # 「一時保存」という文字を含むボタン、または特定のクラス、または特定のinput名を探す
+        click_strict(driver, "//input[@value='一時保存'] | //a[contains(text(), '一時保存')] | input[name='doOnceTemporary'] | .is-break")
+        
         handle_potential_popup(driver) # 確認ダイアログ処理
         wait_for_return_page(driver)   # 画面遷移待ち
         dismiss_success_modal(driver)  # 完了報告モーダルを閉じる
@@ -367,15 +369,16 @@ def main():
         print("\n--- [4] 車内清掃フェーズ ---")
         click_section_button(driver, "車内清掃")
 
-        # ★修正箇所：項目名を指定せず、全項目を自動選択
+        # 全項目自動選択
         select_all_radio_first_option(driver)
 
-        # 完了ボタン
+        # 完了ボタン (汎用セレクタ使用)
         print("   完了ボタンをクリック...")
-        click_strict(driver, "input[name='doOnceSave']")
+        click_strict(driver, "//input[@value='完了'] | //a[contains(text(), '完了')] | .complete-button")
+        
         handle_potential_popup(driver)
         wait_for_return_page(driver)
-        dismiss_success_modal(driver) # 完了報告モーダルを閉じる
+        dismiss_success_modal(driver)
 
         # --- [5] 洗車フェーズ ---
         print("\n--- [5] 洗車フェーズ ---")
@@ -384,7 +387,8 @@ def main():
         select_radio_strict(driver, "exteriorDirt", "2") # 洗車不要
 
         print("   完了ボタンをクリック...")
-        click_strict(driver, "input[name='doOnceSave']")
+        click_strict(driver, "//input[@value='完了'] | //a[contains(text(), '完了')] | .complete-button")
+        
         handle_potential_popup(driver)
         wait_for_return_page(driver)
         dismiss_success_modal(driver)
@@ -396,7 +400,8 @@ def main():
         select_radio_strict(driver, "exteriorState", "1")
 
         print("   完了ボタンをクリック...")
-        click_strict(driver, "input[name='doOnceSave']")
+        click_strict(driver, "//input[@value='完了'] | //a[contains(text(), '完了')] | .complete-button")
+        
         handle_potential_popup(driver)
         wait_for_return_page(driver)
         dismiss_success_modal(driver)
