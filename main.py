@@ -135,6 +135,45 @@ def select_radio_strict(driver, name_attr, value):
         take_screenshot(driver, f"ERROR_Radio_{name_attr}")
         raise Exception(f"ラジオボタン選択失敗: {name_attr}={value}") from e
 
+def select_all_radio_first_option(driver):
+    """
+    【車内清掃用】
+    ページ内の全ラジオボタン項目を自動検出し、
+    各グループで「OK (value='1')」または「最初の選択肢」を選択する
+    """
+    print("   ページ内の全ラジオボタン項目を自動検出・入力中...")
+    try:
+        # ページ内のラジオボタンのname属性をすべて取得（重複排除）
+        radio_elements = driver.find_elements(By.XPATH, "//input[@type='radio']")
+        names = set([el.get_attribute('name') for el in radio_elements if el.get_attribute('name')])
+        
+        print(f"   検出された項目数: {len(names)}")
+        
+        for name in names:
+            target = None
+            # まず value='1' (OK) を優先的に探す
+            try:
+                xpath_ok = f"//input[@name='{name}' and @value='1']"
+                target = driver.find_element(By.XPATH, xpath_ok)
+            except:
+                # なければそのグループの最初のラジオボタンを選択 (左側)
+                try:
+                    xpath_any = f"(//input[@name='{name}'])[1]"
+                    target = driver.find_element(By.XPATH, xpath_any)
+                except:
+                    pass
+            
+            if target:
+                driver.execute_script("arguments[0].scrollIntoView({block: 'center'});", target)
+                time.sleep(0.1)
+                driver.execute_script("arguments[0].click();", target)
+                print(f"   [Auto] Radio selected for: {name}")
+            else:
+                print(f"   [Warning] 項目 {name} の選択肢が見つかりませんでした")
+
+    except Exception as e:
+        print(f"   [Warning] ラジオボタン自動選択中にエラーが発生しましたが続行します: {e}")
+
 def wait_for_return_page(driver):
     """工程終了後、一覧(search/index) または 点検トップ(maintenanceTop) に戻るのを待機"""
     print("   画面遷移を待機中(search/index/maintenanceTop)...")
@@ -150,7 +189,7 @@ def wait_for_return_page(driver):
 # メイン処理
 # ==========================================
 def main():
-    print("=== Automation Start (Fix: Tire Pressure Logic & Success Modal) ===")
+    print("=== Automation Start (Fix: Variable Items & Tire Pressure) ===")
 
     if len(sys.argv) < 2:
         print("Error: No payload provided.")
@@ -265,7 +304,7 @@ def main():
             input_strict(driver, f"input[name='tireGroove{suffix}Ip']", ip)
             input_strict(driver, f"input[name='tireGroove{suffix}Fp']", fp)
             
-            # 空気圧 (調整前のみ入力し、調整後はスキップ)
+            # 空気圧 (修正: 調整前のみ入力)
             press = d.get('press', '')
             input_strict(driver, f"input[name='tirePressure{suffix}']", press)
             # input_strict(driver, f"input[name='tirePressureAdjusted{suffix}']", press) # スキップ
@@ -328,10 +367,8 @@ def main():
         print("\n--- [4] 車内清掃フェーズ ---")
         click_section_button(driver, "車内清掃")
 
-        select_radio_strict(driver, "interiorDirt", "1")
-        select_radio_strict(driver, "interiorCheckTrouble", "1")
-        select_radio_strict(driver, "soundVolume", "1")
-        select_radio_strict(driver, "lostArticle", "1")
+        # ★修正箇所：項目名を指定せず、全項目を自動選択
+        select_all_radio_first_option(driver)
 
         # 完了ボタン
         print("   完了ボタンをクリック...")
