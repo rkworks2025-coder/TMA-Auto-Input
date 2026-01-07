@@ -149,6 +149,7 @@ def select_all_radio_first_option(driver):
         names = set([el.get_attribute('name') for el in radios if el.get_attribute('name')])
         
         print(f"   検出項目数: {len(names)}")
+        
         for name in names:
             target_xpath = f"//input[@name='{name}' and @value='1'] | (//input[@name='{name}'])[1]"
             try:
@@ -176,7 +177,7 @@ def wait_for_return_page(driver):
 # メイン処理
 # ==========================================
 def main():
-    print("=== Automation Start (Fix: Increased Timeout to 30s) ===")
+    print("=== Automation Start (Fix: Login Retry Added) ===")
 
     if len(sys.argv) < 2:
         print("Error: No payload provided.")
@@ -195,14 +196,31 @@ def main():
     driver = get_chrome_driver()
 
     try:
-        # [1] ログイン
+        # [1] ログイン (リトライ機能追加版)
         print("\n--- [1] ログイン ---")
-        driver.get(target_url)
-        id_parts = TMA_ID.split("-")
-        input_strict(driver, "#cardNo1", id_parts[0])
-        input_strict(driver, "#cardNo2", id_parts[1])
-        input_strict(driver, "#password", TMA_PW)
-        click_strict(driver, ".btn-primary")
+        
+        MAX_RETRIES = 5
+        for attempt in range(1, MAX_RETRIES + 1):
+            try:
+                print(f"   [Login] 接続試行中... ({attempt}/{MAX_RETRIES})")
+                driver.get(target_url)
+                id_parts = TMA_ID.split("-")
+                input_strict(driver, "#cardNo1", id_parts[0])
+                input_strict(driver, "#cardNo2", id_parts[1])
+                input_strict(driver, "#password", TMA_PW)
+                click_strict(driver, ".btn-primary")
+                print("   [Login] 成功")
+                break # ログイン成功でループを抜ける
+            except Exception as e:
+                print(f"   [Login Error] ログイン失敗: {e}")
+                if attempt < MAX_RETRIES:
+                    print("   [Retry] 10秒待機後に再試行します...")
+                    time.sleep(10)
+                else:
+                    print("   [Fatal] リトライ上限に達しました。")
+                    take_screenshot(driver, "LOGIN_FAILED_FINAL")
+                    raise e # 最終的なエラーとして処理を中断
+
         
         try: click_strict(driver, "//main//a[contains(@href,'reserve')] | //main//button[contains(text(),'予約履歴')]", timeout=5)
         except: pass 
