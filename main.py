@@ -136,19 +136,19 @@ def wait_for_return_page(driver):
         raise Exception("トップ画面に戻れませんでした (Timeout)")
 
 # ==========================================
-# 新・自動入力ロジック (Visible Only)
+# 究極の自動入力ロジック (Visible Only / No Scope)
 # ==========================================
 def fill_visible_radios(driver):
     """
-    画面上の「見えている」ラジオボタンだけを探して自動処理する
+    画面全体から「今見えている」ラジオボタンだけを探して処理する。
+    HTMLの親子構造には依存しない。
     """
-    print("   [Auto Fill] 表示中のラジオボタンを解析します...")
+    print("   [Auto Fill] 画面上の可視ラジオボタンを検索中...")
     
-    # 1. ページ全体のラジオボタンを取得
-    # スコープ(div指定)を廃止。body全体から探す。
+    # 1. ページ内の全ラジオボタンを取得
     radios = driver.find_elements(By.XPATH, "//input[@type='radio']")
     
-    # 2. 「見えている(is_displayed)」ものだけをフィルタリング
+    # 2. 見えているものだけを抽出
     visible_radios = []
     for r in radios:
         try:
@@ -158,7 +158,9 @@ def fill_visible_radios(driver):
             continue
 
     if not visible_radios:
-        print("   [Info] 表示されているラジオボタンはありません。")
+        # ここで「無い」のはおかしいので警告は出すが、エラーにはせず続行させる
+        # (タブ切り替え直後などで本当に無いケースも稀にあるため)
+        print("   [Info] 操作可能なラジオボタンがありませんでした。")
         return
 
     # 3. nameごとにグループ化
@@ -170,7 +172,7 @@ def fill_visible_radios(driver):
             radio_groups[name] = []
         radio_groups[name].append(r)
 
-    print(f"   検出項目数(可視): {len(radio_groups)}")
+    print(f"   操作対象項目数: {len(radio_groups)}")
 
     # 4. グループごとに処理
     for name, elements in radio_groups.items():
@@ -185,7 +187,7 @@ def fill_visible_radios(driver):
             print(f"   [Skip] 既に選択済み: {name}")
             continue
 
-        # 例外設定 or デフォルト(0)
+        # インデックス決定 (例外 or 0)
         target_index = EXCEPTION_INDEXES.get(name, 0)
         
         if target_index >= len(elements):
@@ -197,14 +199,14 @@ def fill_visible_radios(driver):
             driver.execute_script("arguments[0].click();", target_el)
             print(f"   [Select] {name} -> Index:{target_index}")
         except Exception as e:
-            # ここは隠蔽せずエラーにする
-            raise Exception(f"ラジオボタン選択失敗: {name}") from e
+            print(f"   [Error] クリック失敗 {name}: {e}")
+            # ここでの失敗は続行不可の可能性が高いが、他のボタンを押すためにループは続ける
 
 # ==========================================
 # メイン処理
 # ==========================================
 def main():
-    print("=== Automation Start (Fix: Visible Only Logic) ===")
+    print("=== Automation Start (Final: Tab Switch & Visible Check) ===")
 
     if len(sys.argv) < 2:
         print("Error: No payload provided.")
@@ -240,7 +242,6 @@ def main():
             except Exception as e:
                 print(f"   [Login Error] ログイン失敗: {e}")
                 if attempt < MAX_RETRIES:
-                    print("   [Retry] 10秒待機後に再試行します...")
                     time.sleep(10)
                 else:
                     take_screenshot(driver, "LOGIN_FAILED_FINAL")
@@ -264,38 +265,38 @@ def main():
         click_section_button(driver, "日常点検")
         WebDriverWait(driver, 30).until(EC.presence_of_element_located((By.TAG_NAME, "body")))
         
-        # [3] 入力: 日常点検
+        # [3] 入力: 日常点検 (タブ切り替えロジック)
         print("\n--- [3] 入力: 日常点検 ---")
 
-        # タブの開閉待ち時間を考慮して処理
+        # 日常点検内のタブ一覧
         sections = [
             "engine", "tire", "motion", "in-car", 
             "equipment", "light", "perimeter", "trunk"
         ]
 
         for section_name in sections:
-            print(f"   Processing Section: {section_name}")
+            print(f"\n   >>> Tab: {section_name}")
             
-            # 1. タブを開く
+            # 1. タブをクリック
             click_strict(driver, f"div[data-name='{section_name}']")
             
-            # 2. アニメーション待機（少し待ってから可視要素を探す）
-            time.sleep(1.0) 
+            # 2. 画面切り替え待機 (1.5秒待つことでアニメーション完了を待つ)
+            time.sleep(1.5)
             
-            # 3. 見えているラジオボタンを全部処理
+            # 3. 見えているラジオボタンを全部押す
+            # (他のタブのボタンは hidden なので押されない)
             fill_visible_radios(driver)
 
-            # 4. タイヤの場合、数値入力 (アコーディオンが開くのを確実に待つ)
+            # 4. タイヤの場合、数値入力
             if section_name == "tire":
-                print("   Filling Tire Data (Depth/Pressure)...")
-                
-                # タイヤ入力欄が見えるまで待機 (ここが重要)
+                print("   [Tire] 数値入力エリアの表示待機...")
                 try:
+                    # タイヤの入力欄が見えるまで確実に待つ
                     WebDriverWait(driver, 10).until(
                         EC.visibility_of_element_located((By.NAME, "tireMfrFrontRightCm"))
                     )
                 except:
-                    print("   [Warn] タイヤ入力欄の待機タイムアウト。続行を試みます。")
+                    print("   [Warn] タイヤ入力欄の待機タイムアウト")
 
                 wheels = [('rf', 'FrontRightCm'), ('lf', 'FrontLeftCm'), ('lr', 'RearLeftBi4'), ('rr', 'RearRightBi4')]
                 for pos, suffix in wheels:
@@ -311,7 +312,7 @@ def main():
                     input_strict(driver, f"input[name='tirePressure{suffix}']", d.get('press', ''))
 
         # === 一時保存 ===
-        print("   一時保存をクリック...")
+        print("\n   一時保存をクリック...")
         click_main_action_button(driver, "save")
         handle_popups(driver)
         wait_for_return_page(driver)
@@ -319,7 +320,7 @@ def main():
         # [4] 車内清掃
         print("\n--- [4] 車内清掃 ---")
         click_section_button(driver, "車内清掃")
-        time.sleep(1)
+        time.sleep(1.5) # 画面遷移待ち
         fill_visible_radios(driver)
         
         click_main_action_button(driver, "complete")
@@ -329,7 +330,7 @@ def main():
         # [5] 洗車
         print("\n--- [5] 洗車 ---")
         click_section_button(driver, "洗車")
-        time.sleep(1)
+        time.sleep(1.5)
         fill_visible_radios(driver)
         
         click_main_action_button(driver, "complete")
@@ -339,7 +340,7 @@ def main():
         # [6] 外装確認
         print("\n--- [6] 外装確認 ---")
         click_section_button(driver, "外装確認")
-        time.sleep(1)
+        time.sleep(1.5)
         fill_visible_radios(driver)
         
         click_main_action_button(driver, "complete")
