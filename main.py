@@ -149,27 +149,27 @@ def wait_for_return_page(driver):
 def fill_section_radios(driver, section_xpath):
     """
     指定エリア内のラジオボタンを自動処理する
+    - アコーディオンが開くのを待つ (Visibility)
     - 既に選択済みなら何もしない (上書き防止)
     - 未選択ならデフォルト位置(0)を選択
     - 例外リストにある名前なら指定位置(Exception Map)を選択
     """
     print(f"   [Auto Fill] エリア解析開始: {section_xpath}")
     
-    # 1. まずエリア内のラジオボタンが表示されるまで待つ (スッポ抜け防止)
-    try:
-        WebDriverWait(driver, 30).until(
-            EC.presence_of_element_located((By.XPATH, f"{section_xpath}//input[@type='radio']"))
-        )
-    except:
-        print("   [Info] このセクションにはラジオボタンが無いか、読み込みに失敗しました。スキップします。")
-        return
+    # 【修正】 presence (存在) ではなく visibility (可視化) を待つ。
+    # アコーディオンが開いて中身が見えるようになるまで最大30秒待機。
+    # ここでエラーが出る場合は「開いていない」か「要素がない」ので、隠蔽せずにエラー停止させる。
+    WebDriverWait(driver, 30).until(
+        EC.visibility_of_any_elements_located((By.XPATH, f"{section_xpath}//input[@type='radio']"))
+    )
 
-    # 2. 全ラジオボタンを取得
+    # 全ラジオボタンを取得
     radios = driver.find_elements(By.XPATH, f"{section_xpath}//input[@type='radio']")
     if not radios:
+        print("   [Warning] ラジオボタンが見つかりません（通常ありえません）")
         return
 
-    # 3. nameごとにグループ化する
+    # nameごとにグループ化
     radio_groups = {}
     for r in radios:
         name = r.get_attribute('name')
@@ -180,9 +180,9 @@ def fill_section_radios(driver, section_xpath):
 
     print(f"   検出項目数: {len(radio_groups)}")
 
-    # 4. グループごとに処理
+    # グループごとに処理
     for name, elements in radio_groups.items():
-        # 4-a. 既に選択されているかチェック (Safe Fill)
+        # 1. 既に選択されているかチェック (Safe Fill)
         is_already_selected = False
         for el in elements:
             if el.is_selected():
@@ -193,7 +193,7 @@ def fill_section_radios(driver, section_xpath):
             print(f"   [Skip] 既に選択済み: {name}")
             continue
 
-        # 4-b. 選択すべきインデックスを決定
+        # 2. 選択すべきインデックスを決定
         target_index = EXCEPTION_INDEXES.get(name, 0)
 
         # 要素数チェック
@@ -201,20 +201,21 @@ def fill_section_radios(driver, section_xpath):
             print(f"   [Warn] {name} の選択肢不足 (要求:{target_index}, 実際:{len(elements)}) -> 左端を選択します")
             target_index = 0
         
-        # 4-c. クリック実行
+        # 3. クリック実行
         try:
             target_el = elements[target_index]
             driver.execute_script("arguments[0].scrollIntoView({block: 'center'});", target_el)
             driver.execute_script("arguments[0].click();", target_el)
             print(f"   [Select] {name} -> Index:{target_index}")
         except Exception as e:
-            print(f"   [Error] 選択失敗 {name}: {e}")
+            # ここでのエラーは致命的なので隠蔽しない
+            raise Exception(f"ラジオボタン選択失敗: {name}") from e
 
 # ==========================================
 # メイン処理
 # ==========================================
 def main():
-    print("=== Automation Start (Fix: Tire Input Order) ===")
+    print("=== Automation Start (Fix: Remove Skip Logic & Wait Visibility) ===")
 
     if len(sys.argv) < 2:
         print("Error: No payload provided.")
@@ -284,12 +285,15 @@ def main():
 
         for section_name in sections:
             print(f"   Processing Section: {section_name}")
+            
+            # 1. セクションを開く
+            # アコーディオンヘッダーをクリック
             click_strict(driver, f"div[data-name='{section_name}']")
             
-            # A. ラジオボタン処理
+            # 2. ラジオボタン処理 (アコーディオンが開いて見えるまで待ってから処理)
             fill_section_radios(driver, f"//div[@data-name='{section_name}']")
 
-            # B. タイヤの数値入力 (タイヤタブが開いている今、実行する)
+            # 3. タイヤの数値入力 (タイヤセクションが開いている今、実行する)
             if section_name == "tire":
                 print("   Filling Tire Data (Depth/Pressure)...")
                 wheels = [('rf', 'FrontRightCm'), ('lf', 'FrontLeftCm'), ('lr', 'RearLeftBi4'), ('rr', 'RearRightBi4')]
