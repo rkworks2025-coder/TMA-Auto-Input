@@ -141,11 +141,19 @@ def select_radio_strict(driver, name_attr, value):
         take_screenshot(driver, f"ERROR_Radio_{name_attr}")
         raise Exception(f"ラジオボタン選択失敗: {name_attr}={value}") from e
 
-def select_all_radio_first_option(driver):
-    """全ラジオボタン自動選択"""
-    print("   全ラジオボタン項目の自動選択を開始...")
+def select_all_radio_first_option(driver, base_xpath="//input[@type='radio']"):
+    """
+    指定範囲内の全ラジオボタン自動選択
+    base_xpath: 探索対象のルート（デフォルトはページ全体）
+    """
+    print(f"   自動選択開始 (Scope: {base_xpath})...")
     try:
-        radios = driver.find_elements(By.XPATH, "//input[@type='radio']")
+        # 【修正】対象のラジオボタンが少なくとも1つ表示されるまで待機する (スッポ抜け防止)
+        WebDriverWait(driver, 30).until(
+            EC.presence_of_element_located((By.XPATH, base_xpath))
+        )
+        
+        radios = driver.find_elements(By.XPATH, base_xpath)
         names = set([el.get_attribute('name') for el in radios if el.get_attribute('name')])
         
         print(f"   検出項目数: {len(names)}")
@@ -160,7 +168,7 @@ def select_all_radio_first_option(driver):
             except:
                 pass
     except Exception as e:
-        print(f"   [Warning] 自動選択エラー: {e}")
+        print(f"   [Warning] 自動選択エラー (待機タイムアウトの可能性): {e}")
 
 def wait_for_return_page(driver):
     """画面遷移待機 (Timeout: 40s)"""
@@ -177,7 +185,7 @@ def wait_for_return_page(driver):
 # メイン処理
 # ==========================================
 def main():
-    print("=== Automation Start (Fix: Login Retry Added) ===")
+    print("=== Automation Start (Fix: Retry+Equipment Logic) ===")
 
     if len(sys.argv) < 2:
         print("Error: No payload provided.")
@@ -196,9 +204,8 @@ def main():
     driver = get_chrome_driver()
 
     try:
-        # [1] ログイン (リトライ機能追加版)
+        # [1] ログイン (リトライ機能追加)
         print("\n--- [1] ログイン ---")
-        
         MAX_RETRIES = 5
         for attempt in range(1, MAX_RETRIES + 1):
             try:
@@ -210,7 +217,7 @@ def main():
                 input_strict(driver, "#password", TMA_PW)
                 click_strict(driver, ".btn-primary")
                 print("   [Login] 成功")
-                break # ログイン成功でループを抜ける
+                break 
             except Exception as e:
                 print(f"   [Login Error] ログイン失敗: {e}")
                 if attempt < MAX_RETRIES:
@@ -219,9 +226,8 @@ def main():
                 else:
                     print("   [Fatal] リトライ上限に達しました。")
                     take_screenshot(driver, "LOGIN_FAILED_FINAL")
-                    raise e # 最終的なエラーとして処理を中断
+                    raise e
 
-        
         try: click_strict(driver, "//main//a[contains(@href,'reserve')] | //main//button[contains(text(),'予約履歴')]", timeout=5)
         except: pass 
 
@@ -289,13 +295,11 @@ def main():
         select_radio_strict(driver, "roomStickerExist", "1")
         select_radio_strict(driver, "deodorantsExist", "1")
 
-        # 装備
+        # 装備 (Fix: 変動対応ロジックへ変更)
+        # 固定項目入力を廃止し、エリア内の全ラジオボタンを自動取得して処理する
         click_strict(driver, "div[data-name='equipment']")
-        select_radio_strict(driver, "backMonitor", "1")
-        select_radio_strict(driver, "cornerSensor", "1")
-        select_radio_strict(driver, "brakeSupport", "1")
-        select_radio_strict(driver, "laneDevianceAlert", "1")
-        select_radio_strict(driver, "driveRecorder", "1")
+        # 他のセクション（エンジン等）を巻き込まないよう、equipment配下に限定して自動選択を実行
+        select_all_radio_first_option(driver, base_xpath="//div[@data-name='equipment']//input[@type='radio']")
 
         # 灯火
         click_strict(driver, "div[data-name='light']")
@@ -321,6 +325,7 @@ def main():
         # [4] 車内清掃
         print("\n--- [4] 車内清掃 ---")
         click_section_button(driver, "車内清掃")
+        # ここはページ全体が対象でOK（デフォルト引数を使用）
         select_all_radio_first_option(driver)
         
         click_main_action_button(driver, "complete")
