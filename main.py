@@ -20,6 +20,16 @@ TMA_PW = "Ccj-222223"
 EVIDENCE_DIR = "evidence"
 
 # ==========================================
+# 例外設定（位置指定: 0始まり）
+# ==========================================
+EXCEPTION_INDEXES = {
+    # ウォッシャー液: 2番目 "OK(補充)"
+    "washerFluidGauge": 1,
+    # 洗車の汚れ: 2番目 "洗車不要"
+    "exteriorDirt": 1
+}
+
+# ==========================================
 # 厳格な操作関数群 (Timeout Extended)
 # ==========================================
 def get_chrome_driver():
@@ -130,36 +140,84 @@ def input_strict(driver, selector_str, value):
         take_screenshot(driver, "ERROR_InputFailed")
         raise Exception(f"入力失敗 (Timeout): {selector_str}") from e
 
-def select_radio_strict(driver, name_attr, value):
-    """ラジオボタン選択 (Timeout: 30s)"""
-    xpath = f"//input[@name='{name_attr}' and @value='{value}']"
+# ==========================================
+# 新・自動入力ロジック (HTML構造対応版)
+# ==========================================
+def fill_active_tab_radios(driver):
+    """
+    現在表示されている入力エリアを探し、その中のラジオボタンを自動処理する。
+    1. div.tab-contents (日常点検用) があればそれを使う。
+    2. なければ body 全体 (車内清掃など) を使う。
+    """
+    print("   [Auto Fill] 表示中の項目を解析中...")
+    time.sleep(0.5) # 切り替えアニメーション待機
+    
+    # 1. 日常点検用のタブコンテンツ(div.tab-contentsのうち表示されているもの)を探す
+    target_area = None
     try:
-        el = WebDriverWait(driver, 30).until(EC.presence_of_element_located((By.XPATH, xpath)))
-        driver.execute_script("arguments[0].click();", el)
-        print(f"   [OK] Radio: {name_attr}={value}")
-    except Exception as e:
-        take_screenshot(driver, f"ERROR_Radio_{name_attr}")
-        raise Exception(f"ラジオボタン選択失敗: {name_attr}={value}") from e
+        # 非表示も含めて取得し、is_displayedで判定
+        contents = driver.find_elements(By.CSS_SELECTOR, "div.tab-contents")
+        for c in contents:
+            if c.is_displayed():
+                target_area = c
+                break
+    except:
+        pass
 
-def select_all_radio_first_option(driver):
-    """全ラジオボタン自動選択"""
-    print("   全ラジオボタン項目の自動選択を開始...")
+    # 2. タブが見つからない場合は全体(body)を対象にする
+    if not target_area:
+        target_area = driver.find_element(By.TAG_NAME, "body")
+
     try:
-        radios = driver.find_elements(By.XPATH, "//input[@type='radio']")
-        names = set([el.get_attribute('name') for el in radios if el.get_attribute('name')])
+        # 3. エリア内のラジオボタンを収集
+        radios = target_area.find_elements(By.TAG_NAME, "input")
+        # type='radio' だけに絞る
+        radios = [r for r in radios if r.get_attribute("type") == "radio"]
+
+        if not radios:
+            print("   [Info] 操作可能なラジオボタンがありませんでした。")
+            return
+
+        # 4. nameごとにグループ化
+        radio_groups = {}
+        for r in radios:
+            name = r.get_attribute("name")
+            if not name: continue
+            if name not in radio_groups:
+                radio_groups[name] = []
+            radio_groups[name].append(r)
         
-        print(f"   検出項目数: {len(names)}")
-        for name in names:
-            target_xpath = f"//input[@name='{name}' and @value='1'] | (//input[@name='{name}'])[1]"
-            try:
-                target = driver.find_element(By.XPATH, target_xpath)
-                driver.execute_script("arguments[0].scrollIntoView({block: 'center'});", target)
-                driver.execute_script("arguments[0].click();", target)
-                print(f"   [Auto] Selected for: {name}")
-            except:
-                pass
+        print(f"   検出項目数: {len(radio_groups)}")
+
+        # 5. グループごとに処理
+        for name, elements in radio_groups.items():
+            # (Safe Fill) 既にチェックが入っているか確認
+            is_checked = False
+            for el in elements:
+                if el.is_selected():
+                    is_checked = True
+                    break
+            
+            if is_checked:
+                continue # 既に値が入っている場合はスキップ
+
+            # 選択するインデックス (デフォルト0=左端, 例外は指定値)
+            target_index = EXCEPTION_INDEXES.get(name, 0)
+            
+            # 要素数が足りているか確認してクリック
+            if target_index < len(elements):
+                # クリック実行 (オーバーレイ対策でJSクリックを使用)
+                driver.execute_script("arguments[0].click();", elements[target_index])
+                print(f"   [Select] {name} -> Index:{target_index}")
+            else:
+                # 選択肢が足りない場合は安全のため左端(0)を選択
+                if len(elements) > 0:
+                    driver.execute_script("arguments[0].click();", elements[0])
+                    print(f"   [Select(Fallback)] {name} -> Index:0")
+
     except Exception as e:
-        print(f"   [Warning] 自動選択エラー: {e}")
+        print(f"   [Error] 自動入力中にエラー: {e}")
+        # 致命的エラーではないので続行させる
 
 def wait_for_return_page(driver):
     """画面遷移待機 (Timeout: 40s)"""
@@ -176,7 +234,7 @@ def wait_for_return_page(driver):
 # メイン処理
 # ==========================================
 def main():
-    print("=== Automation Start (Fix: Increased Timeout to 30s) ===")
+    print("=== Automation Start (Modified: Auto-Fill Input Only) ===")
 
     if len(sys.argv) < 2:
         print("Error: No payload provided.")
@@ -225,20 +283,13 @@ def main():
         print("\n--- [3] 入力: 日常点検 ---")
         WebDriverWait(driver, 30).until(EC.presence_of_element_located((By.TAG_NAME, "body")))
 
-        # エンジン
+        # エンジン (タブ切り替えは元のまま、入力のみ自動化)
         click_strict(driver, "div[data-name='engine']") 
-        select_radio_strict(driver, "coolantGauge", "2")
-        select_radio_strict(driver, "engineOilGauge", "1")
-        select_radio_strict(driver, "brakeFluidGauge", "1")
-        select_radio_strict(driver, "washerFluidGauge", "2")
+        fill_active_tab_radios(driver)
 
         # タイヤ
         click_strict(driver, "div[data-name='tire']")
-        select_radio_strict(driver, "tireType", "1")
-        select_radio_strict(driver, "tireDamageRightFront", "1")
-        select_radio_strict(driver, "tireDamageLeftFront", "1")
-        select_radio_strict(driver, "tireDamageLeftRear", "1")
-        select_radio_strict(driver, "tireDamageRightRear", "1")
+        fill_active_tab_radios(driver)
 
         wheels = [('rf', 'FrontRightCm'), ('lf', 'FrontLeftCm'), ('lr', 'RearLeftBi4'), ('rr', 'RearRightBi4')]
         for pos, suffix in wheels:
@@ -256,43 +307,27 @@ def main():
 
         # 動作確認
         click_strict(driver, "div[data-name='motion']")
-        select_radio_strict(driver, "engineCondition", "1")
-        select_radio_strict(driver, "brakeCondition", "1")
-        select_radio_strict(driver, "parkingBrakeCondition", "1")
-        select_radio_strict(driver, "washerSprayCondition", "1")
-        select_radio_strict(driver, "wiperWipeCondition", "1")
+        fill_active_tab_radios(driver)
 
         # 車載品
         click_strict(driver, "div[data-name='in-car']")
-        select_radio_strict(driver, "inspectionCertificateExist", "1")
-        select_radio_strict(driver, "inspectionStickerExist", "1")
-        select_radio_strict(driver, "autoLiabilityExist", "1")
-        select_radio_strict(driver, "maintenanceStickerExist", "1")
-        select_radio_strict(driver, "roomStickerExist", "1")
-        select_radio_strict(driver, "deodorantsExist", "1")
+        fill_active_tab_radios(driver)
 
         # 装備
         click_strict(driver, "div[data-name='equipment']")
-        select_radio_strict(driver, "backMonitor", "1")
-        select_radio_strict(driver, "cornerSensor", "1")
-        select_radio_strict(driver, "brakeSupport", "1")
-        select_radio_strict(driver, "laneDevianceAlert", "1")
-        select_radio_strict(driver, "driveRecorder", "1")
+        fill_active_tab_radios(driver)
 
         # 灯火
         click_strict(driver, "div[data-name='light']")
-        select_radio_strict(driver, "turnSignal", "1")
+        fill_active_tab_radios(driver)
         
         # 車両周り
         click_strict(driver, "div[data-name='perimeter']")
-        select_radio_strict(driver, "fuelCap", "1")
-        select_radio_strict(driver, "carStickerExist", "1")
+        fill_active_tab_radios(driver)
 
         # トランク
         click_strict(driver, "div[data-name='trunk']")
-        select_radio_strict(driver, "warningTrianglePlateDamage", "1")
-        select_radio_strict(driver, "puncRepairKitExist", "1")
-        select_radio_strict(driver, "cleaningKit", "1")
+        fill_active_tab_radios(driver)
 
         # === 一時保存 ===
         print("   一時保存をクリック...")
@@ -303,7 +338,7 @@ def main():
         # [4] 車内清掃
         print("\n--- [4] 車内清掃 ---")
         click_section_button(driver, "車内清掃")
-        select_all_radio_first_option(driver)
+        fill_active_tab_radios(driver)
         
         click_main_action_button(driver, "complete")
         handle_popups(driver)
@@ -312,7 +347,7 @@ def main():
         # [5] 洗車
         print("\n--- [5] 洗車 ---")
         click_section_button(driver, "洗車")
-        select_radio_strict(driver, "exteriorDirt", "2")
+        fill_active_tab_radios(driver)
         
         click_main_action_button(driver, "complete")
         handle_popups(driver)
@@ -321,7 +356,7 @@ def main():
         # [6] 外装確認
         print("\n--- [6] 外装確認 ---")
         click_section_button(driver, "外装確認")
-        select_radio_strict(driver, "exteriorState", "1")
+        fill_active_tab_radios(driver)
         
         click_main_action_button(driver, "complete")
         handle_popups(driver)
