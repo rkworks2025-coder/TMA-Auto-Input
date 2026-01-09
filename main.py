@@ -30,6 +30,14 @@ EXCEPTION_INDEXES = {
 }
 
 # ==========================================
+# スキップ設定（自動入力をしない項目）
+# ==========================================
+SKIP_NAMES = [
+    "tireJackupSetExist",  # 車載工具類・ジャッキ
+    "juniorSeat"           # ジュニアシート
+]
+
+# ==========================================
 # 厳格な操作関数群 (Timeout Extended)
 # ==========================================
 def get_chrome_driver():
@@ -141,18 +149,19 @@ def input_strict(driver, selector_str, value):
         raise Exception(f"入力失敗 (Timeout): {selector_str}") from e
 
 # ==========================================
-# 新・自動入力ロジック (HTML構造対応版)
+# 新・自動入力ロジック (HTML構造対応 & Skip機能)
 # ==========================================
 def fill_active_tab_radios(driver):
     """
     現在表示されている入力エリアを探し、その中のラジオボタンを自動処理する。
     1. div.tab-contents (日常点検用) があればそれを使う。
     2. なければ body 全体 (車内清掃など) を使う。
+    3. SKIP_NAMES に含まれる項目は無視する。
     """
     print("   [Auto Fill] 表示中の項目を解析中...")
     time.sleep(0.5) # 切り替えアニメーション待機
     
-    # 1. 日常点検用のタブコンテンツ(div.tab-contentsのうち表示されているもの)を探す
+    # 1. 日常点検用のタブコンテンツを探す
     target_area = None
     try:
         # 非表示も含めて取得し、is_displayedで判定
@@ -171,7 +180,6 @@ def fill_active_tab_radios(driver):
     try:
         # 3. エリア内のラジオボタンを収集
         radios = target_area.find_elements(By.TAG_NAME, "input")
-        # type='radio' だけに絞る
         radios = [r for r in radios if r.get_attribute("type") == "radio"]
 
         if not radios:
@@ -191,6 +199,11 @@ def fill_active_tab_radios(driver):
 
         # 5. グループごとに処理
         for name, elements in radio_groups.items():
+            # (Skip Check) 除外リストに含まれる場合はスキップ
+            if name in SKIP_NAMES:
+                print(f"   [Skip] 除外リスト対象: {name}")
+                continue
+
             # (Safe Fill) 既にチェックが入っているか確認
             is_checked = False
             for el in elements:
@@ -217,7 +230,6 @@ def fill_active_tab_radios(driver):
 
     except Exception as e:
         print(f"   [Error] 自動入力中にエラー: {e}")
-        # 致命的エラーではないので続行させる
 
 def wait_for_return_page(driver):
     """画面遷移待機 (Timeout: 40s)"""
@@ -234,7 +246,7 @@ def wait_for_return_page(driver):
 # メイン処理
 # ==========================================
 def main():
-    print("=== Automation Start (Modified: Auto-Fill Input Only) ===")
+    print("=== Automation Start (Fix: Auto-Fill with Skip Logic) ===")
 
     if len(sys.argv) < 2:
         print("Error: No payload provided.")
