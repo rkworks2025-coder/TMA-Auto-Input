@@ -3,6 +3,7 @@ import os
 import time
 import datetime
 import json
+import urllib.request
 from selenium import webdriver
 from selenium.webdriver.chrome.options import Options
 from selenium.webdriver.chrome.service import Service
@@ -18,6 +19,7 @@ DEFAULT_LOGIN_URL = "https://dailycheck.tc-extsys.jp/tcrappsweb/web/login/tawLog
 TMA_ID = "0030-927583"
 TMA_PW = "Ccj-222223"
 EVIDENCE_DIR = "evidence"
+DISCORD_WEBHOOK_URL = "https://discord.com/api/webhooks/1474006170057441300/Emo5Ooe48jBUzMhzLrCBn85_3Td-ck3jYtXtVa2vdXWWyT2HxSuKghWchrG7gCsZhEqY"
 
 # ==========================================
 # 例外設定（位置指定: 0始まり）
@@ -38,7 +40,8 @@ SKIP_NAMES = [
 ]
 
 # ==========================================
-# 厳格な操作関数群 (Timeout Extended)
+# 厳格な操作関数群 
+# (Timeout Extended)
 # ==========================================
 def get_chrome_driver():
     options = Options()
@@ -64,7 +67,8 @@ def take_screenshot(driver, name):
         print("   [写] 撮影失敗")
 
 def click_strict(driver, selector_str, timeout=30):
-    """汎用クリック関数 (Timeout: 30s)"""
+    """汎用クリック関数 
+    (Timeout: 30s)"""
     by_method = By.XPATH if selector_str.startswith("/") or selector_str.startswith("(") else By.CSS_SELECTOR
     try:
         el = WebDriverWait(driver, timeout).until(EC.element_to_be_clickable((by_method, selector_str)))
@@ -242,6 +246,20 @@ def wait_for_return_page(driver):
         take_screenshot(driver, "ERROR_ReturnPage")
         raise Exception("トップ画面に戻れませんでした (Timeout)")
 
+def send_discord_notification(message):
+    """Discordへ通知を送信する"""
+    try:
+        req = urllib.request.Request(
+            DISCORD_WEBHOOK_URL,
+            data=json.dumps({"content": message}).encode('utf-8'),
+            headers={"Content-Type": "application/json"},
+            method="POST"
+        )
+        with urllib.request.urlopen(req):
+            pass
+    except Exception as e:
+        print(f"   [Error] Discord通知に失敗しました: {e}")
+
 # ==========================================
 # メイン処理
 # ==========================================
@@ -375,11 +393,13 @@ def main():
         wait_for_return_page(driver)
 
         print("\n=== SUCCESS: 全工程完了 ===")
+        send_discord_notification("TMAへの入力が完了")
         sys.exit(0)
 
     except Exception as e:
         print(f"\n[!!!] CRITICAL ERROR [!!!]\n{e}")
         take_screenshot(driver, "FATAL_ERROR")
+        send_discord_notification("エラーにより入力が完了しませんでした")
         sys.exit(1)
     finally:
         driver.quit()
