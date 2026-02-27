@@ -3,6 +3,12 @@ name: Run TMA Automation
 on:
   repository_dispatch:
     types: [webhook_from_gas]
+  workflow_dispatch:
+    inputs:
+      plate:
+        description: 'Target Plate'
+        required: true
+        type: string
 
 jobs:
   run-script:
@@ -29,9 +35,17 @@ jobs:
 
       - name: Run Automation Script
         # ★重要修正箇所★
-        # バラバラの引数ではなく、client_payload 全体をJSON文字列として渡す
+        # バラバラの引数ではなく、全体をJSON文字列として渡す（イベントに応じて切り替え）
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          INPUTS_JSON: ${{ toJson(github.event.inputs) }}
+          PAYLOAD_JSON: ${{ toJson(github.event.client_payload) }}
         run: |
-          python main.py '${{ toJson(github.event.client_payload) }}'
+          if [ "$EVENT_NAME" = "workflow_dispatch" ]; then
+            python main.py "$INPUTS_JSON"
+          else
+            python main.py "$PAYLOAD_JSON"
+          fi
 
       # 成功・失敗に関わらず、必ず証拠写真をアップロード
       - name: Upload Evidence
