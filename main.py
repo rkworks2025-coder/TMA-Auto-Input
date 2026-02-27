@@ -4,6 +4,7 @@ import time
 import datetime
 import json
 import urllib.request
+import urllib.parse
 from selenium import webdriver
 from selenium.webdriver.chrome.options import Options
 from selenium.webdriver.chrome.service import Service
@@ -20,6 +21,7 @@ TMA_ID = "0030-927583"
 TMA_PW = "Ccj-222223"
 EVIDENCE_DIR = "evidence"
 DISCORD_WEBHOOK_URL = "https://discord.com/api/webhooks/1474006170057441300/Emo5Ooe48jBUzMhzLrCBn85_3Td-ck3jYtXtVa2vdXWWyT2HxSuKghWchrG7gCsZhEqY"
+GAS_URL = "https://script.google.com/macros/s/AKfycbyXbPaarnD7mQa_rqm6mk-Os3XBH6C731aGxk7ecJC5U3XjtwfMkeF429rezkAo79jN/exec"
 
 # ==========================================
 # 例外設定（位置指定: 0始まり）
@@ -67,8 +69,7 @@ def take_screenshot(driver, name):
         print("   [写] 撮影失敗")
 
 def click_strict(driver, selector_str, timeout=30):
-    """汎用クリック関数 
-    (Timeout: 30s)"""
+    """汎用クリック関数 (Timeout: 30s)"""
     by_method = By.XPATH if selector_str.startswith("/") or selector_str.startswith("(") else By.CSS_SELECTOR
     try:
         el = WebDriverWait(driver, timeout).until(EC.element_to_be_clickable((by_method, selector_str)))
@@ -252,7 +253,10 @@ def send_discord_notification(message):
         req = urllib.request.Request(
             DISCORD_WEBHOOK_URL,
             data=json.dumps({"content": message}).encode('utf-8'),
-            headers={"Content-Type": "application/json"},
+            headers={
+                "Content-Type": "application/json",
+                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"  # 403回避用
+            },
             method="POST"
         )
         with urllib.request.urlopen(req):
@@ -264,7 +268,7 @@ def send_discord_notification(message):
 # メイン処理
 # ==========================================
 def main():
-    print("=== Automation Start (Fix: Auto-Fill with Skip Logic) ===")
+    print("=== Automation Start (Integrated GAS Pull & Cookie) ===")
 
     if len(sys.argv) < 2:
         print("Error: No payload provided.")
@@ -274,11 +278,40 @@ def main():
         payload_str = sys.argv[1]
         data = json.loads(payload_str)
         target_url = data.get('target_url') or DEFAULT_LOGIN_URL
-        tire_data = data.get('tire_data', {})
-        print(f"Target Plate: {data.get('plate')}")
+        plate = data.get('plate')
     except Exception as e:
         print(f"Error parsing payload: {e}")
         sys.exit(1)
+
+    if not plate:
+        print("Error: No plate provided in payload.")
+        sys.exit(1)
+
+    print(f"Target Plate: {plate}")
+
+    # [0] GASからタイヤデータとCookieを取得
+    print("\n--- [0] GASデータ Pull ---")
+    try:
+        req_url = f"{GAS_URL}?action=getTireData&plate={urllib.parse.quote(plate)}"
+        req = urllib.request.Request(req_url)
+        with urllib.request.urlopen(req) as res:
+            gas_res = json.loads(res.read().decode('utf-8'))
+    except Exception as e:
+        send_discord_notification(f"[{plate}] GASからのデータ取得に失敗しました: {e}")
+        sys.exit(1)
+
+    if not gas_res.get("ok"):
+        err_msg = gas_res.get("error", "Unknown error")
+        print(f"GAS Error: {err_msg}")
+        if err_msg == "no_recent_tire_data":
+            send_discord_notification(f"[{plate}] 24時間以内のタイヤ点検データが存在しないため、自動入力を中止しました。")
+        else:
+            send_discord_notification(f"[{plate}] GASエラーのため自動入力を中止しました: {err_msg}")
+        sys.exit(1)
+
+    tire_data = gas_res.get("tire_data", {})
+    saved_cookie_str = gas_res.get("cookie", "")
+    print("   [OK] データ取得完了")
 
     driver = get_chrome_driver()
 
@@ -286,14 +319,52 @@ def main():
         # [1] ログイン
         print("\n--- [1] ログイン ---")
         driver.get(target_url)
-        id_parts = TMA_ID.split("-")
-        input_strict(driver, "#cardNo1", id_parts[0])
-        input_strict(driver, "#cardNo2", id_parts[1])
-        input_strict(driver, "#password", TMA_PW)
-        click_strict(driver, ".btn-primary")
         
-        try: click_strict(driver, "//main//a[contains(@href,'reserve')] | //main//button[contains(text(),'予約履歴')]", timeout=5)
-        except: pass 
+        login_success = False
+
+        if saved_cookie_str:
+            print("   保存されたCookieを使ってログインを試行します...")
+            try:
+                cookies = json.loads(saved_cookie_str)
+                for c in cookies:
+                    driver.add_cookie(c)
+                
+                # Cookie適用のためリロード（ダッシュボード確認）
+                driver.get("https://dailycheck.tc-extsys.jp/tcrappsweb/web/menu/tawMenu.html")
+                WebDriverWait(driver, 5).until(EC.presence_of_element_located((By.XPATH, "//main//a[contains(@href,'reserve')] | //main//button[contains(text(),'予約履歴')]")))
+                print("   [OK] Cookieでのログインに成功しました（スキップ完了）")
+                login_success = True
+            except:
+                print("   [Info] Cookieログイン失敗（期限切れ等）。通常ログインへ移行します。")
+                driver.get(target_url)
+
+        if not login_success:
+            id_parts = TMA_ID.split("-")
+            input_strict(driver, "#cardNo1", id_parts[0])
+            input_strict(driver, "#cardNo2", id_parts[1])
+            input_strict(driver, "#password", TMA_PW)
+            click_strict(driver, ".btn-primary")
+            
+            try: 
+                click_strict(driver, "//main//a[contains(@href,'reserve')] | //main//button[contains(text(),'予約履歴')]", timeout=10)
+            except: 
+                pass 
+
+            # 新しいCookieを取得してGASへPush
+            try:
+                new_cookies = driver.get_cookies()
+                new_cookie_str = json.dumps(new_cookies)
+                req_data = json.dumps({"action": "updateCookie", "cookie": new_cookie_str}).encode('utf-8')
+                req = urllib.request.Request(
+                    GAS_URL,
+                    data=req_data,
+                    headers={"Content-Type": "application/json"},
+                    method="POST"
+                )
+                with urllib.request.urlopen(req):
+                    print("   [OK] 新しいCookieをGASへ保存しました")
+            except Exception as e:
+                print(f"   [Warn] CookieのGAS保存に失敗: {e}")
 
         # [2] 点検開始
         print("\n--- [2] 点検開始 ---")
@@ -393,13 +464,13 @@ def main():
         wait_for_return_page(driver)
 
         print("\n=== SUCCESS: 全工程完了 ===")
-        send_discord_notification("TMAへの入力が完了")
+        send_discord_notification(f"[{plate}] TMAへの入力が完了しました")
         sys.exit(0)
 
     except Exception as e:
         print(f"\n[!!!] CRITICAL ERROR [!!!]\n{e}")
         take_screenshot(driver, "FATAL_ERROR")
-        send_discord_notification("エラーにより入力が完了しませんでした")
+        send_discord_notification(f"[{plate}] エラーにより入力が完了しませんでした: {e}")
         sys.exit(1)
     finally:
         driver.quit()
