@@ -313,6 +313,12 @@ def main():
     saved_cookie_str = gas_res.get("cookie", "")
     print("   [OK] データ取得完了")
 
+    # ▼▼▼ 今回追加したログ出力処理 ▼▼▼
+    print("   ▼▼▼ 取得したタイヤデータ詳細 ▼▼▼")
+    print(json.dumps(tire_data, indent=2, ensure_ascii=False))
+    print("   ▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲")
+    # ▲▲▲ 追加はここまで ▲▲▲
+
     driver = get_chrome_driver()
 
     try:
