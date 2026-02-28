@@ -268,7 +268,7 @@ def send_discord_notification(message):
 # メイン処理
 # ==========================================
 def main():
-    print("=== Automation Start (Integrated GAS Pull & Cookie) ===")
+    print("=== Automation Start (Integrated GAS Pull & Cookie & Zero Fill) ===")
 
     if len(sys.argv) < 2:
         print("Error: No payload provided.")
@@ -313,11 +313,9 @@ def main():
     saved_cookie_str = gas_res.get("cookie", "")
     print("   [OK] データ取得完了")
 
-    # ▼▼▼ 今回追加したログ出力処理 ▼▼▼
     print("   ▼▼▼ 取得したタイヤデータ詳細 ▼▼▼")
     print(json.dumps(tire_data, indent=2, ensure_ascii=False))
     print("   ▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲")
-    # ▲▲▲ 追加はここまで ▲▲▲
 
     driver = get_chrome_driver()
 
@@ -401,7 +399,11 @@ def main():
         wheels = [('rf', 'FrontRightCm'), ('lf', 'FrontLeftCm'), ('lr', 'RearLeftBi4'), ('rr', 'RearRightBi4')]
         for pos, suffix in wheels:
             d = tire_data.get(pos, {})
-            input_strict(driver, f"input[name='tireMfr{suffix}']", d.get('week', ''))
+            
+            # ★製造年週の4桁補完（0埋め）
+            week_raw = d.get('week', '')
+            week_val = str(week_raw).zfill(4) if week_raw else ""
+            input_strict(driver, f"input[name='tireMfr{suffix}']", week_val)
             
             depth_str = str(d.get('depth', '5.5'))
             if '.' in depth_str: ip, fp = depth_str.split('.')
