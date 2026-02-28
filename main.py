@@ -16,7 +16,8 @@ from webdriver_manager.chrome import ChromeDriverManager
 # ==========================================
 # 設定エリア
 # ==========================================
-DEFAULT_LOGIN_URL = "https://dailycheck.tc-extsys.jp/tcrappsweb/web/login/tawLogin.html"
+# ★ダミーテスト環境のURLに変更済み
+DEFAULT_LOGIN_URL = "https://rkworks2025-coder.github.io/TMA-Simulation-Lab/login"
 TMA_ID = "0030-927583"
 TMA_PW = "Ccj-222223"
 EVIDENCE_DIR = "evidence"
