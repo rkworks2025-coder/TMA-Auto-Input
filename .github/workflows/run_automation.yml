@@ -13,17 +13,16 @@ on:
 jobs:
   run-script:
     runs-on: ubuntu-latest
-    
-    # ▼▼▼ 爆速化コンテナの導入（Chrome, Python構築済み） ▼▼▼
-    container:
-      image: joyzoursky/python-chromedriver:3.9
 
     steps:
       - name: Checkout code
         uses: actions/checkout@v3
 
-      # フォントインストールとPythonセットアップの工程を全削除し、
-      # コンテナの環境に直接必要なライブラリだけを数秒で追加します
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.9'
+
       - name: Install dependencies
         run: |
           pip install -r requirements.txt
