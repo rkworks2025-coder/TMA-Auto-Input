@@ -291,14 +291,25 @@ def main():
 
     # [0] GASからタイヤデータとCookieを取得
     print("\n--- [0] GASデータ Pull ---")
-    try:
-        req_url = f"{GAS_URL}?action=getTireData&plate={urllib.parse.quote(plate)}"
-        req = urllib.request.Request(req_url)
-        with urllib.request.urlopen(req) as res:
-            gas_res = json.loads(res.read().decode('utf-8'))
-    except Exception as e:
-        send_discord_notification(f"[{plate}] GASからのデータ取得に失敗しました: {e}")
-        sys.exit(1)
+    GAS_RETRY_COUNT = 3
+    GAS_RETRY_INTERVAL = 10  # 秒
+    gas_res = None
+    for attempt in range(1, GAS_RETRY_COUNT + 1):
+        try:
+            req_url = f"{GAS_URL}?action=getTireData&plate={urllib.parse.quote(plate)}"
+            req = urllib.request.Request(req_url)
+            with urllib.request.urlopen(req) as res:
+                gas_res = json.loads(res.read().decode('utf-8'))
+            print(f"   [OK] GAS通信成功 (試行 {attempt}/{GAS_RETRY_COUNT})")
+            break
+        except Exception as e:
+            print(f"   [Warn] GAS通信失敗 (試行 {attempt}/{GAS_RETRY_COUNT}): {e}")
+            if attempt < GAS_RETRY_COUNT:
+                print(f"   {GAS_RETRY_INTERVAL}秒後にリトライします...")
+                time.sleep(GAS_RETRY_INTERVAL)
+            else:
+                send_discord_notification(f"[{plate}] GASからのデータ取得に失敗しました ({GAS_RETRY_COUNT}回試行): {e}")
+                sys.exit(1)
 
     if not gas_res.get("ok"):
         err_msg = gas_res.get("error", "Unknown error")
