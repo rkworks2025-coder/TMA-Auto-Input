@@ -384,7 +384,7 @@ def main():
         # [2] 点検開始
         print("\n--- [2] 点検開始 ---")
         try:
-            click_strict(driver, "//span[@class='link-btn']/a[contains(text(), '点検')]")
+            click_strict(driver, "//span[@class='link-btn']/a[text()='点検']")
             handle_popups(driver)
             wait_for_return_page(driver)
         except Exception as e:
