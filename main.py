@@ -39,7 +39,7 @@ EXCEPTION_INDEXES = {
 SKIP_NAMES = [
     "tireJackupSetExist",  # 車載工具類・ジャッキ
     "juniorSeat",          # ジュニアシート
-    "turnSignal"           # 灯火装置：点灯状態（フル・基本共通の意図的未入力 → 一時保存ボタン維持用）
+    "turnSignal"           # 灯火装置：点灯状態（基本点検時の意図的未入力 → 一時保存ボタン維持用）
 ]
 
 # ==========================================
@@ -436,8 +436,9 @@ def main():
         print("\n--- [3] 入力: 日常点検 ---")
         WebDriverWait(driver, 30).until(EC.presence_of_element_located((By.TAG_NAME, "body")))
 
-        # エンジン（基本点検時は存在しない）
-        if click_tab_if_exists(driver, "div[data-name='engine']"):
+        # エンジン（基本点検時は存在しない）→ フル/基本の判定にも使用
+        is_full_inspection = click_tab_if_exists(driver, "div[data-name='engine']")
+        if is_full_inspection:
             fill_active_tab_radios(driver)
 
         # タイヤ（フル・基本共通）
@@ -474,9 +475,15 @@ def main():
         if click_tab_if_exists(driver, "div[data-name='equipment']"):
             fill_active_tab_radios(driver)
 
-        # 灯火（フル・基本共通 / turnSignalはSKIP_NAMESにより意図的未入力 → 一時保存ボタン維持）
+        # 灯火（フル・基本共通）
+        # フル点検時: turnSignalを入力（juniorSeatが未入力のため一時保存ボタンが出る）
+        # 基本点検時: turnSignalをスキップ（SKIP_NAMES経由で未入力のまま → 一時保存ボタン維持）
+        if is_full_inspection:
+            SKIP_NAMES.remove("turnSignal")
         click_strict(driver, "div[data-name='light']")
         fill_active_tab_radios(driver)
+        if is_full_inspection:
+            SKIP_NAMES.append("turnSignal")
         
         # 車両周り（基本点検時は存在しない）
         if click_tab_if_exists(driver, "div[data-name='perimeter']"):
