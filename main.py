@@ -38,7 +38,8 @@ EXCEPTION_INDEXES = {
 # ==========================================
 SKIP_NAMES = [
     "tireJackupSetExist",  # 車載工具類・ジャッキ
-    "juniorSeat"           # ジュニアシート
+    "juniorSeat",          # ジュニアシート
+    "turnSignal"           # 灯火装置：点灯状態（フル・基本共通の意図的未入力 → 一時保存ボタン維持用）
 ]
 
 # ==========================================
@@ -116,6 +117,42 @@ def click_section_button(driver, section_title):
     except Exception as e:
         take_screenshot(driver, f"ERROR_SectionClick_{section_title}")
         raise Exception(f"「{section_title}」の開始ボタンが見つかりません。") from e
+
+def click_tab_if_exists(driver, selector_str, timeout=5):
+    """
+    タブが存在・表示されていればクリックしてTrueを返す。
+    存在しない・非表示の場合はスキップしてFalseを返す。
+    基本点検時に存在しないタブを安全に読み飛ばすために使用。
+    """
+    try:
+        el = WebDriverWait(driver, timeout).until(EC.element_to_be_clickable((By.CSS_SELECTOR, selector_str)))
+        driver.execute_script("arguments[0].scrollIntoView({block: 'center'});", el)
+        time.sleep(0.5)
+        el.click()
+        print(f"   [OK] Tab Click: {selector_str}")
+        return True
+    except:
+        print(f"   [Skip] タブ非表示/不存在のためスキップ: {selector_str}")
+        return False
+
+def click_section_if_exists(driver, section_title, timeout=5):
+    """
+    セクションの開始ボタンが存在すればクリックしてTrueを返す。
+    存在しない場合はスキップしてFalseを返す。
+    基本点検時に存在しないセクション（洗車など）を安全に読み飛ばすために使用。
+    """
+    xpath = f"//div[contains(@class, 'check-state-area')][.//p[contains(text(), '{section_title}')]]//a[contains(text(), '点検')]"
+    print(f"   [{section_title}] の開始ボタンを探しています（存在確認）...")
+    try:
+        el = WebDriverWait(driver, timeout).until(EC.element_to_be_clickable((By.XPATH, xpath)))
+        driver.execute_script("arguments[0].scrollIntoView({block: 'center'});", el)
+        time.sleep(0.5)
+        el.click()
+        print(f"   [OK] Section Click: {section_title}")
+        return True
+    except:
+        print(f"   [Skip] セクション不存在のためスキップ: {section_title}")
+        return False
 
 def handle_popups(driver):
     """ボタン押下後のポップアップ処理セット"""
@@ -399,11 +436,11 @@ def main():
         print("\n--- [3] 入力: 日常点検 ---")
         WebDriverWait(driver, 30).until(EC.presence_of_element_located((By.TAG_NAME, "body")))
 
-        # エンジン (タブ切り替えは元のまま、入力のみ自動化)
-        click_strict(driver, "div[data-name='engine']") 
-        fill_active_tab_radios(driver)
+        # エンジン（基本点検時は存在しない）
+        if click_tab_if_exists(driver, "div[data-name='engine']"):
+            fill_active_tab_radios(driver)
 
-        # タイヤ
+        # タイヤ（フル・基本共通）
         click_strict(driver, "div[data-name='tire']")
         fill_active_tab_radios(driver)
 
@@ -425,29 +462,29 @@ def main():
             # 空気圧
             input_strict(driver, f"input[name='tirePressure{suffix}']", d.get('press', ''))
 
-        # 動作確認
+        # 動作確認（フル・基本共通）
         click_strict(driver, "div[data-name='motion']")
         fill_active_tab_radios(driver)
 
-        # 車載品
-        click_strict(driver, "div[data-name='in-car']")
-        fill_active_tab_radios(driver)
+        # 車載品（基本点検時は存在しない）
+        if click_tab_if_exists(driver, "div[data-name='in-car']"):
+            fill_active_tab_radios(driver)
 
-        # 装備
-        click_strict(driver, "div[data-name='equipment']")
-        fill_active_tab_radios(driver)
+        # 装備（基本点検時は存在しない）
+        if click_tab_if_exists(driver, "div[data-name='equipment']"):
+            fill_active_tab_radios(driver)
 
-        # 灯火
+        # 灯火（フル・基本共通 / turnSignalはSKIP_NAMESにより意図的未入力 → 一時保存ボタン維持）
         click_strict(driver, "div[data-name='light']")
         fill_active_tab_radios(driver)
         
-        # 車両周り
-        click_strict(driver, "div[data-name='perimeter']")
-        fill_active_tab_radios(driver)
+        # 車両周り（基本点検時は存在しない）
+        if click_tab_if_exists(driver, "div[data-name='perimeter']"):
+            fill_active_tab_radios(driver)
 
-        # トランク
-        click_strict(driver, "div[data-name='trunk']")
-        fill_active_tab_radios(driver)
+        # トランク（基本点検時は存在しない）
+        if click_tab_if_exists(driver, "div[data-name='trunk']"):
+            fill_active_tab_radios(driver)
 
         # === 一時保存 ===
         print("   一時保存をクリック...")
@@ -464,14 +501,13 @@ def main():
         handle_popups(driver)
         wait_for_return_page(driver)
 
-        # [5] 洗車
+        # [5] 洗車（基本点検時は存在しない）
         print("\n--- [5] 洗車 ---")
-        click_section_button(driver, "洗車")
-        fill_active_tab_radios(driver)
-        
-        click_main_action_button(driver, "complete")
-        handle_popups(driver)
-        wait_for_return_page(driver)
+        if click_section_if_exists(driver, "洗車"):
+            fill_active_tab_radios(driver)
+            click_main_action_button(driver, "complete")
+            handle_popups(driver)
+            wait_for_return_page(driver)
 
         # [6] 外装確認
         print("\n--- [6] 外装確認 ---")
