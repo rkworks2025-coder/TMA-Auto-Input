@@ -316,6 +316,10 @@ def main():
         data = json.loads(payload_str)
         target_url = data.get('target_url') or DEFAULT_LOGIN_URL
         plate = data.get('plate')
+        # 巡回アプリの「TMAボタン」押下時、GAS(Tirelog側)がその場でTirelogを直接
+        # スキャンして見つけた最新データを、GitHub Actionsのpayloadに埋め込んで渡してくる。
+        # これが存在する場合はそれを信頼できる最新データとしてそのまま使う。
+        embedded_tire_data = data.get('tire_data')
     except Exception as e:
         print(f"Error parsing payload: {e}")
         sys.exit(1)
@@ -326,8 +330,8 @@ def main():
 
     print(f"Target Plate: {plate}")
 
-    # [0] GASからタイヤデータとCookieを取得
-    print("\n--- [0] GASデータ Pull ---")
+    # [0] GASからCookieを取得（タイヤデータは可能な限りpayload埋め込み分を使用）
+    print("\n--- [0] GAS Cookie Pull ---")
     GAS_RETRY_COUNT = 3
     GAS_RETRY_INTERVAL = 10  # 秒
     gas_res = None
@@ -345,11 +349,20 @@ def main():
                 print(f"   {GAS_RETRY_INTERVAL}秒後にリトライします...")
                 time.sleep(GAS_RETRY_INTERVAL)
             else:
-                send_discord_notification(f"[{plate}] GASからのデータ取得に失敗しました ({GAS_RETRY_COUNT}回試行): {e}")
-                sys.exit(1)
+                print("   [Warn] GAS(Cookie取得)への通信に失敗しましたが、通常ログインで継続します。")
 
-    if not gas_res.get("ok"):
-        err_msg = gas_res.get("error", "Unknown error")
+    tire_data = embedded_tire_data
+    saved_cookie_str = ""
+
+    if gas_res and gas_res.get("ok"):
+        # Cookieは取得できる場合のみ利用（無くても通常ログインにフォールバックする）
+        saved_cookie_str = gas_res.get("cookie", "")
+        if tire_data is None:
+            tire_data = gas_res.get("tire_data", {})
+    elif tire_data is None:
+        # payloadにも埋め込みデータが無く(workflow_dispatchの手動実行等)、
+        # 別GASへの照会も失敗/エラーだった場合のみ、ここで初めて中止する
+        err_msg = (gas_res.get("error") if gas_res else "GAS通信失敗") or "Unknown error"
         print(f"GAS Error: {err_msg}")
         if err_msg == "no_recent_tire_data":
             send_discord_notification(f"[{plate}] 24時間以内のタイヤ点検データが存在しないため、自動入力を中止しました。")
@@ -357,8 +370,6 @@ def main():
             send_discord_notification(f"[{plate}] GASエラーのため自動入力を中止しました: {err_msg}")
         sys.exit(1)
 
-    tire_data = gas_res.get("tire_data", {})
-    saved_cookie_str = gas_res.get("cookie", "")
     print("   [OK] データ取得完了")
 
     print("   ▼▼▼ 取得したタイヤデータ詳細 ▼▼▼")
