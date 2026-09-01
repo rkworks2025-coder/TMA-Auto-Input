@@ -34,6 +34,7 @@ jobs:
           EVENT_NAME: ${{ github.event_name }}
           INPUTS_JSON: ${{ toJson(github.event.inputs) }}
           PAYLOAD_JSON: ${{ toJson(github.event.client_payload) }}
+          DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
         run: |
           if [ "$EVENT_NAME" = "workflow_dispatch" ]; then
             python main.py "$INPUTS_JSON"
