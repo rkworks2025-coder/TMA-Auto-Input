@@ -17,8 +17,8 @@ from webdriver_manager.chrome import ChromeDriverManager
 # 設定エリア
 # ==========================================
 DEFAULT_LOGIN_URL = "https://dailycheck.tc-extsys.jp/tcrappsweb/web/login/tawLogin.html"
-TMA_ID = "REDACTED-REDACTED"
-TMA_PW = "REDACTED"
+TMA_ID = os.environ.get("TMA_ID", "")
+TMA_PW = os.environ.get("TMA_PW_MODE1", "")
 EVIDENCE_DIR = "evidence"
 DISCORD_WEBHOOK_URL = os.environ.get("DISCORD_WEBHOOK_URL", "")
 GAS_URL = "https://script.google.com/macros/s/AKfycbyXbPaarnD7mQa_rqm6mk-Os3XBH6C731aGxk7ecJC5U3XjtwfMkeF429rezkAo79jN/exec"
