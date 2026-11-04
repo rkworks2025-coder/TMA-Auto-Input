@@ -57,8 +57,8 @@ EXCEPTION_INDEXES = {
 # ==========================================
 SKIP_NAMES = [
     "tireJackupSetExist",  # 車載工具類・ジャッキ
-    "juniorSeat",          # ジュニアシート
-    "turnSignal"           # 灯火装置：点灯状態（基本点検時の意図的未入力 → 一時保存ボタン維持用）
+    "juniorSeat"           # ジュニアシート（フル点検時の意図的未入力 → 一時保存ボタン維持用）
+    # ※基本点検時は未入力を残さず全項目入力して日常点検を「完了」する (2026-11-04)
 ]
 
 # ==========================================
@@ -637,13 +637,9 @@ def main():
 
         # 灯火（フル・基本共通）
         # フル点検時: turnSignalを入力（juniorSeatが未入力のため一時保存ボタンが出る）
-        # 基本点検時: turnSignalをスキップ（SKIP_NAMES経由で未入力のまま → 一時保存ボタン維持）
-        if is_full_inspection:
-            SKIP_NAMES.remove("turnSignal")
+        # 基本点検時: turnSignalも入力（未入力を残さず、最後に「完了」を押す）
         open_tab(driver, "div[data-name='light']")
         fill_active_tab_radios(driver, "日常点検/灯火")
-        if is_full_inspection:
-            SKIP_NAMES.append("turnSignal")
 
         # 車両周り（基本点検時は存在しない）
         if open_tab(driver, "div[data-name='perimeter']", optional=True):
@@ -653,10 +649,14 @@ def main():
         if open_tab(driver, "div[data-name='trunk']", optional=True):
             fill_active_tab_radios(driver, "日常点検/トランク")
 
-        # === 一時保存 ===
-        print("   一時保存をクリック...")
+        # === 一時保存（フル点検）／完了（基本点検） ===
         start_url = driver.current_url
-        click_main_action_button(driver, "save")
+        if is_full_inspection:
+            print("   一時保存をクリック...")
+            click_main_action_button(driver, "save")
+        else:
+            print("   基本点検のため完了をクリック...")
+            click_main_action_button(driver, "complete")
         handle_popups(driver, start_url)
         wait_for_return_page(driver)
 
