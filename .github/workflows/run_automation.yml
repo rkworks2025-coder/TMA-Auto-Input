@@ -1,4 +1,6 @@
 name: Run TMA Automation
+# 実行一覧に車番を表示（作業アプリが該当の実行を特定して起動遅延を判定するために使う）
+run-name: TMA ${{ inputs.plate || github.event.client_payload.plate }}
 
 on:
   repository_dispatch:
@@ -37,6 +39,8 @@ jobs:
           DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
           TMA_ID: ${{ secrets.TMA_ID }}
           TMA_PW_MODE1: ${{ secrets.TMA_PW_MODE1 }}
+          # 起動遅延チェック用（自分の実行情報を読むだけ。新規Secret不要）
+          GITHUB_TOKEN: ${{ github.token }}
         run: |
           if [ "$EVENT_NAME" = "workflow_dispatch" ]; then
             python main.py "$INPUTS_JSON"

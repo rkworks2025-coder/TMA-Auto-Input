@@ -39,6 +39,15 @@ AFTER_ACTION_WAIT = 60       # ボタン押下後、ポップアップ処理と�
 LOGIN_MAX_ATTEMPTS = 2       # ログインの試行回数
 RETURN_URL_PATTERN = r"(search|index|maintenanceTop)"
 
+# ==========================================
+# ★GitHub Actions起動遅延対策 (2026-11-12)
+# ==========================================
+# GitHub側の障害でランナー割当が遅れた場合、作業アプリ(work/app.js)が3分経過時点で
+# GitLab経由の実行に自動で切り替える。二重入力を防ぐため、こちらも同じ基準
+# （実行作成→ランナー割当が3分超）で入力を中止する。GitLabで動く時は
+# GITHUB_RUN_ID が無いのでこのチェックは行われない。
+GITHUB_START_DELAY_LIMIT = 180  # 秒（work/app.js の TMA_WATCH_LIMIT_MS と必ず同じ値にすること）
+
 # 入力項目が見つからなかったタブ/セクション（最後のDiscord通知に添える）
 EMPTY_AREAS = []
 
@@ -424,6 +433,34 @@ def send_discord_notification(message):
     except Exception as e:
         print(f"   [Error] Discord通知に失敗しました: {e}")
 
+def get_github_start_delay():
+    """★GitHub Actions上で、実行作成からランナー割当までの遅延秒数を返す。
+    GitLab等GitHub以外で動いている場合や、取得に失敗した場合はNone（従来通り入力する）"""
+    run_id = os.environ.get("GITHUB_RUN_ID")
+    repo = os.environ.get("GITHUB_REPOSITORY")
+    token = os.environ.get("GITHUB_TOKEN")
+    if not run_id or not repo:
+        return None
+    def _get(url):
+        headers = {"Accept": "application/vnd.github+json", "User-Agent": "TMA-Auto-Input"}
+        if token:
+            headers["Authorization"] = f"Bearer {token}"
+        req = urllib.request.Request(url, headers=headers)
+        with urllib.request.urlopen(req, timeout=15) as res:
+            return json.loads(res.read().decode('utf-8'))
+    def _parse(ts):
+        return datetime.datetime.strptime(ts, "%Y-%m-%dT%H:%M:%SZ")
+    try:
+        run = _get(f"https://api.github.com/repos/{repo}/actions/runs/{run_id}")
+        jobs = _get(f"https://api.github.com/repos/{repo}/actions/runs/{run_id}/jobs").get("jobs", [])
+        started = [j.get("started_at") for j in jobs if j.get("started_at")]
+        if not run.get("created_at") or not started:
+            return None
+        return (_parse(min(started)) - _parse(run["created_at"])).total_seconds()
+    except Exception as e:
+        print(f"   [注意] 起動遅延チェックをスキップします: {e}")
+        return None
+
 def login_with_password(driver, target_url):
     """★ID/PWでログインし、ログイン画面から抜けたことを確認する（失敗時は10秒あけて1回やり直す）"""
     last_err = None
@@ -475,6 +512,16 @@ def main():
         sys.exit(1)
 
     print(f"Target Plate: {plate}")
+
+    # ★GitHub Actions起動遅延チェック（遅延が基準超なら作業アプリ側がGitLabで実行するため、こちらは中止）
+    start_delay = get_github_start_delay()
+    if start_delay is not None:
+        print(f"GitHub start delay: {int(start_delay)}s")
+        if start_delay > GITHUB_START_DELAY_LIMIT:
+            m, s = divmod(int(start_delay), 60)
+            print("Abort: GitHub Actionsの起動遅延が基準を超えたため入力を中止します")
+            send_discord_notification(f"[{plate}] GitHub Actionsの起動が{m}分{s}秒遅れたため、こちらでの入力は中止しました（作業アプリからGitLab経由で実行されます）")
+            sys.exit(0)
 
     # [0] GASからCookieを取得（タイヤデータは可能な限りpayload埋め込み分を使用）
     print("\n--- [0] GAS Cookie Pull ---")
